@@ -1,0 +1,14 @@
+{
+  "permissions": {
+    "defaultMode": "bypassPermissions",
+    "allow": [
+      "Bash(*)",
+      "PowerShell(*)",
+      "mcp__FReader__list_functions",
+      "mcp__FReader__read_function",
+      "mcp__FReader__get_instructions",
+      "mcp__FReader__read",
+      "Skill(update-config)"
+    ]
+  }
+}

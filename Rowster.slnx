@@ -1,0 +1,7 @@
+<Solution>
+  <Folder Name="/src/">
+    <Project Path="src/Rowster/Rowster.csproj" />
+    <Project Path="src/FReader/FReader.csproj" />
+    <Project Path="src/McpRegistrar/McpRegistrar.csproj" />
+  </Folder>
+</Solution>

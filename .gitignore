@@ -1,0 +1,29 @@
+# Build outputs
+bin/
+obj/
+publish/
+
+# Installer outputs
+installer/*.exe
+installer/*.tmp
+
+# IDE files
+*.user
+*.suo
+*.userprefs
+.vs/
+*.sln.docstates
+
+# OS files
+.DS_Store
+Thumbs.db
+desktop.ini
+
+# Build artifacts in source trees
+*.dll
+*.pdb
+*.exe
+*.deps.json
+*.runtimeconfig.json
+*.nupkg
+*.log

@@ -1,0 +1,14 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <PropertyGroup>
+    <OutputType>Exe</OutputType>
+    <TargetFramework>net9.0</TargetFramework>
+    <Nullable>enable</Nullable>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <AssemblyName>FWriter</AssemblyName>
+    <Version>1.0.3</Version>
+  </PropertyGroup>
+  <ItemGroup>
+    <ProjectReference Include="..\FReader\FReader.csproj" />
+    <ProjectReference Include="..\Commons\LLMUtilities.Commons.csproj" />
+  </ItemGroup>
+</Project>

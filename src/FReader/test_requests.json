@@ -1,0 +1,11 @@
+{"jsonrpc":"2.0","id":1,"method":"initialize"}
+{"jsonrpc":"2.0","id":2,"method":"notifications/initialized"}
+{"jsonrpc":"2.0","id":3,"method":"tools/call","params":{"name":"read","arguments":{"path":"D:\\work\\nyingi\\code\\systems\\llm-utilities\\src\\FReader\\test_sample.cs"}}}
+{"jsonrpc":"2.0","id":4,"method":"tools/call","params":{"name":"read_function","arguments":{"path":"D:\\work\\nyingi\\code\\systems\\llm-utilities\\src\\FReader\\test_sample.cs","name":"GetDataAsync"}}}
+{"jsonrpc":"2.0","id":5,"method":"tools/call","params":{"name":"read","arguments":{"path":"D:\\work\\nyingi\\code\\systems\\llm-utilities\\src\\FReader\\test_sample.cs","stripImports":true,"truncate":5}}}
+{"jsonrpc":"2.0","id":6,"method":"tools/call","params":{"name":"read","arguments":{"path":"D:\\work\\nyingi\\code\\systems\\llm-utilities\\src\\FReader\\test_sample.cs","lineStart":9,"lineEnd":13,"normalizeIndent":true}}}
+{"jsonrpc":"2.0","id":7,"method":"tools/call","params":{"name":"list_functions","arguments":{"path":"D:\\work\\nyingi\\code\\systems\\llm-utilities\\src\\FReader\\test_sample.cs","includeSystem":true}}}
+{"jsonrpc":"2.0","id":8,"method":"tools/call","params":{"name":"extract_function","arguments":{"path":"D:\\work\\nyingi\\code\\systems\\llm-utilities\\src\\FReader\\test_sample.cs","name":"ToSTrinG"}}}
+{"jsonrpc":"2.0","id":9,"method":"tools/call","params":{"name":"summarize","arguments":{"path":"D:\\work\\nyingi\\code\\systems\\llm-utilities\\src\\FReader\\test_sample.cs"}}}
+{"jsonrpc":"2.0","id":10,"method":"tools/call","params":{"name":"read","arguments":{"path":"D:\\work\\nyingi\\code\\systems\\llm-utilities\\src\\FReader\\test_sample.cs","lineStart":99,"lineEnd":100}}}
+{"jsonrpc":"2.0","id":11,"method":"tools/call","params":{"name":"read","arguments":{"path":"D:\\work\\nyingi\\code\\systems\\llm-utilities\\src\\FReader\\test_sample.cs","lineStart":20,"lineEnd":10}}}
