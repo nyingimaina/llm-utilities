@@ -755,6 +755,7 @@ COMPACT FIELDS: _r=rows _h=headers _line_start/_line_end=range _sig=signature _t
     }
 
     protected override string? GetHarnessInstructions() => Harness;
+    protected override int? AutoNotifyThresholdMs => 10000;
 
     protected override object GetInstructions()
     {
