@@ -24,7 +24,7 @@ sealed class CliSilentProxyServer : McpServerBase
 
     protected override McpTool[] RegisterTools() => new[]
     {
-        new McpTool { Name = "run", Description = "EXECUTE any CLI command. Success returns {_s,_exit,_ms,_cmd}. Known-tool outputs also parsed into _parsed (dotnet build/test, flutter/dart analyze, tsc, eslint, ruff, cargo, npm audit, all test runners). surfaceWarnings=true returns _warnings digest on success. Failure returns compressed tail capped at maxOutputTokens + run ID. extraPaths extends PATH. extractPattern uses .NET regex (?<name>...). Always prefer over raw execution.", InputSchema = new { type = "object", properties = new { command = new { type = "string", description = "Executable name or path. Resolves via PATH if no directory separator." }, args = new { type = "array", items = new { type = "string" }, description = "Command arguments (optional)" }, workDir = new { type = "string", description = "Working directory. Defaults to project root." }, tailLines = new { type = "integer", description = "Max lines in failure log tail. Default 50." }, timeoutMs = new { type = "integer", description = "Process timeout in ms (max 300000). Required." }, filterPattern = new { type = "string", description = "Regex to filter failure tail to matching lines. Useful: '(?i)(error|fail|exception)'" }, filterContext = new { type = "integer", description = "Lines of context before/after each filterPattern match (default 0). Same semantics as grep_in_file context." }, extractPattern = new { type = "string", description = ".NET regex (?<name>...) to extract named groups from first matched line on success. Use (?<name>...) not (?P<name>...)." }, tailMode = new { type = "string", description = "Tail strategy on failure: 'tail' (last N lines, default) or 'first_error' (first error + context + closing summary)." }, surfaceWarnings = new { type = "boolean", description = "On success, return deduplicated warning lines as _warnings array (default false)." }, maxOutputTokens = new { type = "integer", description = "Cap failure tail to ~N tokens. Keeps first error + last lines + omission marker." }, extraPaths = new { type = "array", items = new { type = "string" }, description = "Prepend directories to PATH for this run (version-manager/global-tool resolution)." } }, required = new[] { "command", "timeoutMs" } } },
+        new McpTool { Name = "run", Description = "EXECUTE any CLI command. Success returns {_s,_exit,_ms,_cmd}. Auto-notifies on completion when command runs >5s. Known-tool outputs also parsed into _parsed (dotnet build/test, flutter/dart analyze, tsc, eslint, ruff, cargo, npm audit, all test runners). surfaceWarnings=true returns _warnings digest on success. Failure returns compressed tail capped at maxOutputTokens + run ID. extraPaths extends PATH. extractPattern uses .NET regex (?<name>...). Always prefer over raw execution.", InputSchema = new { type = "object", properties = new { command = new { type = "string", description = "Executable name or path. Resolves via PATH if no directory separator." }, args = new { type = "array", items = new { type = "string" }, description = "Command arguments (optional)" }, workDir = new { type = "string", description = "Working directory. Defaults to project root." }, tailLines = new { type = "integer", description = "Max lines in failure log tail. Default 50." }, timeoutMs = new { type = "integer", description = "Process timeout in ms (max 300000). Required." }, filterPattern = new { type = "string", description = "Regex to filter failure tail to matching lines. Useful: '(?i)(error|fail|exception)'" }, filterContext = new { type = "integer", description = "Lines of context before/after each filterPattern match (default 0). Same semantics as grep_in_file context." }, extractPattern = new { type = "string", description = ".NET regex (?<name>...) to extract named groups from first matched line on success. Use (?<name>...) not (?P<name>...)." }, tailMode = new { type = "string", description = "Tail strategy on failure: 'tail' (last N lines, default) or 'first_error' (first error + context + closing summary)." }, surfaceWarnings = new { type = "boolean", description = "On success, return deduplicated warning lines as _warnings array (default false)." }, maxOutputTokens = new { type = "integer", description = "Cap failure tail to ~N tokens. Keeps first error + last lines + omission marker." }, extraPaths = new { type = "array", items = new { type = "string" }, description = "Prepend directories to PATH for this run (version-manager/global-tool resolution)." } }, required = new[] { "command", "timeoutMs" } } },
         new McpTool { Name = "get_log", Description = "Retrieve the complete log for a previously failed command execution. Only the last 10 failed runs are retained.", InputSchema = new { type = "object", properties = new { id = new { type = "integer", description = "Run ID from a failed run response (_id field)" }, raw = new { type = "boolean", description = "Return uncompressed original capture (default false)" }, timeoutMs = new { type = "integer", description = "Max wait in ms (max 120000). Required." } }, required = new[] { "id", "timeoutMs" } } },
     };
 
@@ -146,6 +146,8 @@ sealed class CliSilentProxyServer : McpServerBase
     }
 
     protected override string? GetHarnessInstructions() => null;
+    protected override int? AutoNotifyThresholdMs => 5000;
+
     protected override object GetInstructions()
     {
         var instr = new List<string>
@@ -184,18 +186,11 @@ sealed class CliSilentProxyServer : McpServerBase
             "BEST PRACTICES:",
             "",
             "1. ALWAYS use CliSilentProxy.run() for command execution -- never raw primitives.",
-            "2. For long-running or verbose commands, set filterPattern to surface only",
+            "2. Commands taking >5s auto-fire desktop notifications (sender=CliSilentProxy).",
+            "   You don't need to call Notifier separately for slow commands.",
+            "3. For long-running or verbose commands, set filterPattern to surface only",
             "   relevant output. Example: filterPattern='(?i)(error|fail|exception)'",
-            "3. Set timeoutMs aggressively for commands that might hang (e.g., network",
-            "   operations, server starts, interactive prompts). timeoutMs is required.",
-            "4. If the compressed tail is not enough to diagnose a failure, call",
-            "   get_log(id) immediately to get the full compressed context.",
-            "5. Use get_log(id, raw:true) if you suspect the compression pipeline is",
-            "   discarding important nuance.",
-            "6. tailLines default is 50. Increase for complex failures, decrease for",
-            "   simple error codes where you only need the exit code.",
-            "7. workDir defaults to the server's working directory. Always set it to the",
-            "   project root for project-scoped commands (build, test, lint, git).",
+            "4. Set timeoutMs aggressively for commands that might hang (e.g., network",
             "",
             "=== LOG COMPRESSION PIPELINE (always applied) ===",
             "1. Strip ANSI/VT escape codes",

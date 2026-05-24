@@ -1,10 +1,11 @@
 <Project Sdk="Microsoft.NET.Sdk">
   <PropertyGroup>
-    <OutputType>Exe</OutputType>
+    <OutputType>WinExe</OutputType>
     <TargetFramework>net9.0</TargetFramework>
     <Nullable>enable</Nullable>
     <ImplicitUsings>enable</ImplicitUsings>
     <AssemblyName>NotifierHelper</AssemblyName>
+    <Version>1.1.0</Version>
     <PublishAot>false</PublishAot>
     <BuiltInComInteropSupport>true</BuiltInComInteropSupport>
   </PropertyGroup>

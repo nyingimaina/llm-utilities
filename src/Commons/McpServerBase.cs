@@ -1,3 +1,4 @@
+using System.Diagnostics;
 using System.Reflection;
 using System.Text.Encodings.Web;
 using System.Text.Json;
@@ -17,6 +18,11 @@ public abstract class McpServerBase
     int _brsCallCounter;
     CancellationTokenSource? _timeoutCts;
     string? _progressToken;
+    bool _canNotify;
+    readonly Queue<long> _notifyTimestamps = new();
+    readonly object _warmLock = new();
+    Process? _warmHelper;
+    TextWriter? _warmHelperStdin;
 
     protected CancellationToken CancellationToken => _timeoutCts?.Token ?? System.Threading.CancellationToken.None;
 
@@ -41,6 +47,9 @@ public abstract class McpServerBase
 
     protected virtual bool RequiresTimeoutMs(string toolName) => true;
     protected virtual int? DefaultTimeoutMs(string toolName) => null;
+    protected virtual int? AutoNotifyThresholdMs => null;
+    protected virtual int NotifyMaxPerWindow => 3;
+    protected virtual int NotifyWindowMs => 60_000;
 
     public void Run(TextReader input, TextWriter output)
     {
@@ -113,10 +122,13 @@ public abstract class McpServerBase
             }
 
             _progressToken = null;
-            if (req.Params?.TryGetProperty("_meta", out var meta) == true
-                && meta.TryGetProperty("progressToken", out var pt))
+            _canNotify = false;
+            if (req.Params?.TryGetProperty("_meta", out var meta) == true)
             {
-                _progressToken = pt.ValueKind == JsonValueKind.String ? pt.GetString() : pt.GetRawText();
+                if (meta.TryGetProperty("progressToken", out var pt))
+                    _progressToken = pt.ValueKind == JsonValueKind.String ? pt.GetString() : pt.GetRawText();
+                if (meta.TryGetProperty("canNotify", out var cn))
+                    _canNotify = cn.ValueKind == JsonValueKind.True;
             }
 
             if (RequiresTimeoutMs(name))
@@ -140,8 +152,11 @@ public abstract class McpServerBase
 
             try
             {
+                var sw = Stopwatch.StartNew();
                 var result = HandleToolCall(name, arguments);
+                sw.Stop();
                 result = MaybeInjectBrsRequest(name, result);
+                result = MaybeInjectShouldNotify(name, result, sw.ElapsedMilliseconds);
                 WriteResult(req.Id, result);
             }
             catch (McpErrorException ex)
@@ -161,6 +176,7 @@ public abstract class McpServerBase
                 _timeoutCts?.Dispose();
                 _timeoutCts = null;
                 _progressToken = null;
+                _canNotify = false;
             }
             return;
         }
@@ -267,6 +283,145 @@ public abstract class McpServerBase
         return asm.GetName().Version?.ToString() ?? "0.0.0";
     }
 
+    object MaybeInjectShouldNotify(string toolName, object result, long elapsedMs)
+    {
+        var threshold = AutoNotifyThresholdMs;
+        if (threshold is null || elapsedMs < threshold) return result;
+        if (toolName == "get_instructions" || toolName == "get_log") return result;
+
+        // Rate-limit: sliding window
+        var maxPerWindow = NotifyMaxPerWindow;
+        var windowMs = NotifyWindowMs;
+        var now = Stopwatch.GetTimestamp();
+        var windowTicks = windowMs * Stopwatch.Frequency / 1000;
+
+        lock (_notifyTimestamps)
+        {
+            while (_notifyTimestamps.Count > 0 && now - _notifyTimestamps.Peek() > windowTicks)
+                _notifyTimestamps.Dequeue();
+
+            if (_notifyTimestamps.Count >= maxPerWindow)
+            {
+                // Rate-limited — handle based on opt-in
+                if (_canNotify)
+                {
+                    // LLM opted in: tell it to notify but flag the cooldown
+                    if (JsonSerializer.SerializeToNode(result) is not JsonObject obj)
+                        return result;
+                    obj["_shouldNotify"] = true;
+                    var oldest = _notifyTimestamps.Peek();
+                    var elapsedWinTicks = now - oldest;
+                    var remainingMs = windowMs - (elapsedWinTicks * 1000 / Stopwatch.Frequency);
+                    obj["_notify_cooldown_ms"] = Math.Max(0, remainingMs);
+                    return obj;
+                }
+                // Not opted in: suppress silently
+                return result;
+            }
+
+            _notifyTimestamps.Enqueue(now);
+        }
+
+        // LLM opted in via _meta._canNotify → give it the flag so it calls Notifier itself
+        if (_canNotify)
+        {
+            if (JsonSerializer.SerializeToNode(result) is not JsonObject obj)
+                return result;
+            obj["_shouldNotify"] = true;
+            return obj;
+        }
+
+        // LLM did not opt in → fire notification via warm helper
+        _ = FireWarmNotification(elapsedMs);
+        return result;
+    }
+
+    async Task FireWarmNotification(long elapsedMs)
+    {
+        try
+        {
+            var helperName = OperatingSystem.IsWindows() ? "NotifierHelper.exe" : "NotifierHelper";
+            var helper = Path.Combine(AppContext.BaseDirectory, helperName);
+            if (!File.Exists(helper)) return;
+
+            Process? proc;
+            lock (_warmLock)
+            {
+                if (_warmHelper == null || _warmHelper.HasExited)
+                {
+                    var psi = new ProcessStartInfo
+                    {
+                        FileName = helper,
+                        UseShellExecute = false,
+                        CreateNoWindow = true,
+                        RedirectStandardInput = true,
+                    };
+                    psi.ArgumentList.Add("--listen");
+                    _warmHelper = Process.Start(psi);
+                    _warmHelperStdin = _warmHelper?.StandardInput;
+                }
+                proc = _warmHelper;
+            }
+
+            if (proc == null) return;
+
+            var req = new
+            {
+                title = $"{_config.Name}: {elapsedMs / 1000.0:F1}s",
+                message = $"Tool call completed in {elapsedMs / 1000.0:F1}s",
+                type = "info",
+                sound = true,
+                dismissAfterMs = 8000,
+                sender = _config.Name,
+                task = _config.Name
+            };
+            var json = JsonSerializer.Serialize(req, _json);
+            await _warmHelperStdin!.WriteLineAsync(json);
+            await _warmHelperStdin.FlushAsync();
+        }
+        catch
+        {
+            // Warm helper failed → fallback to cold-start
+            lock (_warmLock)
+            {
+                if (_warmHelper != null) { try { _warmHelper.Kill(); } catch { } }
+                _warmHelper = null;
+                _warmHelperStdin = null;
+            }
+            ColdFireNotification(elapsedMs);
+        }
+    }
+
+    void ColdFireNotification(long elapsedMs)
+    {
+        try
+        {
+            var helperName = OperatingSystem.IsWindows() ? "NotifierHelper.exe" : "NotifierHelper";
+            var helper = Path.Combine(AppContext.BaseDirectory, helperName);
+            if (!File.Exists(helper)) return;
+
+            var psi = new ProcessStartInfo
+            {
+                FileName = helper,
+                UseShellExecute = false,
+                CreateNoWindow = true,
+            };
+            psi.ArgumentList.Add("--title");
+            psi.ArgumentList.Add($"{_config.Name}: {elapsedMs / 1000.0:F1}s");
+            psi.ArgumentList.Add("--message");
+            psi.ArgumentList.Add($"Completed in {elapsedMs / 1000.0:F1}s");
+            psi.ArgumentList.Add("--type");
+            psi.ArgumentList.Add("info");
+            psi.ArgumentList.Add("--sender");
+            psi.ArgumentList.Add(_config.Name);
+            psi.ArgumentList.Add("--dismiss-after-ms");
+            psi.ArgumentList.Add("8000");
+            using var proc = Process.Start(psi);
+            proc?.WaitForExit(3000);
+        }
+        catch { /* best-effort */ }
+    }
+
     protected void ReportProgress(double progress, string? message = null, double? total = null)
     {
         if (_progressToken is null) return;
@@ -358,6 +513,45 @@ public abstract class McpServerBase
         "- On error: print '[retry 1/3] tool timed out (30s), retrying...' on console.",
         "  Wait 2-5s, retry with backoff (100ms*2^attempt, cap 5s).",
         "- After 3 failures: print 'gave up, falling back to {fallback}', blacklist.",
-        "- Next session starts fresh."
+        "- Next session starts fresh.",
+        "",
+        "=== NOTIFICATION WORKFLOW (mandatory read) ===",
+        "This suite includes a Notifier MCP server that sends desktop toast notifications.",
+        "IT IS YOUR RESPONSIBILITY to ensure the user receives notifications about important",
+        "events. Here is how the notification contract works:",
+        "",
+        "1. For ANY tool call that takes longer than a threshold (typically >5s), the server",
+        "   will include _shouldNotify: true in its response IF you pass",
+        "   _meta:{canNotify:true} in your tool call parameters.",
+        "",
+        "2. When you see _shouldNotify: true, you MUST call Notifier.notify() with a",
+        "   SPECIFIC, HUMAN-READABLE message. Do not paste raw exit codes or generic",
+        "   tool names. Example GOOD: 'dotnet build succeeded (56s, 0 errors, 12 warnings)'",
+        "   Example BAD: 'CliSilentProxy: run completed in 8.2s'. The user needs to know",
+        "   WHAT happened, not WHICH tool ran. Include: what was done, outcome, duration,",
+        "   and key metrics (error count, test results, etc.).",
+        "",
+        "3. NOTIFICATION QUALITY RULES:",
+        "   - DO include: specific operation name, outcome summary, duration",
+        "   - DO NOT include: internal server names, raw exit codes, tool names",
+        "   - DO write for a human: 'Build succeeded (12s)' not 'run exit 0'",
+        "   - DO mention failures clearly: '3 tests failed, 12 passed (8s)'",
+        "   - DO set sender to your LLM name so the user knows who sent it",
+        "   - If _notify_cooldown_ms is present, you are rate-limited (max 3/60s).",
+        "     Either skip the notification or aggregate: instead of 3 separate calls,",
+        "     fire one summarizing 'Completed 3 tasks in the last minute'.",
+        "",
+        "4. If you do NOT pass _meta:{canNotify:true}, the server fires a generic",
+        "   auto-notification. No action needed from you, but the message will be",
+        "   mechanical (e.g. 'CliSilentProxy: 8.2s'). This is the fallback — YOU can",
+        "   do better by opting in and writing a proper message.",
+        "",
+        "5. For non-server tasks (code review, analysis, reasoning) you should call",
+        "   Notifier.notify() directly. Same quality rules apply.",
+        "",
+        "6. DO NOT notify for every trivial synchronous step — only when the user",
+        "   would benefit from being alerted after tabbing away.",
+        "",
+        "7. Always set sender (your LLM name) so the user knows who sent it.",
     };
 }

@@ -29,26 +29,28 @@ sealed class NotifierServer : McpServerBase
         new McpTool
         {
             Name = "notify",
-            Description = "Send a desktop notification. Works cross-platform (Windows/ macOS/ Linux). Slide-in animation, frosted glass UI, dopamine arrival effect. Use for one-shot alerts or confirmations.",
+            Description = "MANDATORY: Call this to alert the user about results YOU produced that aren't covered by auto-notification (e.g. code review done, analysis complete, important logical error). Auto-notification already handles slow CLI commands (>5s), searches, and queries. Use notify for YOUR cognitive work — analysis, review, reasoning results the user should know about. DO NOT notify for every trivial synchronous step or micro-operation the user can see happening in real time.",
             InputSchema = new
             {
                 type = "object",
                 properties = new
                 {
-                    title = new { type = "string", description = "Notification title" },
-                    message = new { type = "string", description = "Notification body text" },
-                    type = new { type = "string", description = "info (default) / error — controls sound and accent colour", @default = "info" },
+                    title = new { type = "string", description = "Notification title. Be specific about what completed." },
+                    message = new { type = "string", description = "Notification body. Include outcome (e.g. '3 tests failed, 12 passed')." },
+                    sender = new { type = "string", description = "Your identity (e.g. 'Claude', 'Gemini', 'Cursor'). MANDATORY: always identify yourself so the user knows which LLM sent this." },
+                    task = new { type = "string", description = "What you were working on (e.g. 'Code review', 'Build fix-123', 'Refactoring auth'). Helps user context-switch instantly." },
+                    type = new { type = "string", description = "info (default) / error — controls accent colour and sound", @default = "info" },
                     sound = new { type = "boolean", description = "Play notification sound (default true)", @default = true },
                     dismissAfterMs = new { type = "integer", description = "Auto-dismiss after N ms (default 5000). 0 = sticky." },
                     timeoutMs = new { type = "integer", description = "Max wait in ms (max 60000). Default 30000." }
                 },
-                required = new[] { "title", "message" }
+                required = new[] { "title", "message", "sender" }
             }
         },
         new McpTool
         {
             Name = "notify_on_complete",
-            Description = "Fire-and-forget: run a shell command, notify when done. Returns immediately with _pid. Notification fires on exit with exit code + elapsed time. Spawns child process and waits in background.",
+            Description = "PREFERRED over CliSilentProxy.run alone: wraps a shell command so a notification fires when it finishes. Use for ANY subprocess that takes >3s: builds, tests, deploys, batch operations, install scripts. Returns immediately so you keep working. Type auto-sets to 'error' when exit code != 0. MANDATORY: always use this instead of bare run() when the command runs unattended.",
             InputSchema = new
             {
                 type = "object",
@@ -57,13 +59,15 @@ sealed class NotifierServer : McpServerBase
                     command = new { type = "string", description = "Executable path or name" },
                     args = new { type = "array", items = new { type = "string" }, description = "Command arguments (optional)" },
                     workDir = new { type = "string", description = "Working directory (optional)" },
-                    title = new { type = "string", description = "Notification title. Default: 'Command Complete'." },
+                    title = new { type = "string", description = "Notification title. Default: 'Command Complete'. Make it specific like 'Build complete' or 'Tests done'." },
                     message = new { type = "string", description = "Custom message template. Default: uses exit code + duration." },
+                    sender = new { type = "string", description = "Your identity (e.g. 'Claude'). MANDATORY: always identify yourself." },
+                    task = new { type = "string", description = "What you were doing (e.g. 'Running tests'). Helps user context-switch." },
                     type = new { type = "string", description = "info (default) / error. Auto-set to error if exit code != 0.", @default = "info" },
                     sound = new { type = "boolean", description = "Play notification sound (default true)", @default = true },
-                    timeoutMs = new { type = "integer", description = "Max wait in ms (max 600000 / 10min). Default polling interval." }
+                    timeoutMs = new { type = "integer", description = "Max wait in ms (max 600000 / 10min). No default = waits indefinitely." }
                 },
-                required = new[] { "command" }
+                required = new[] { "command", "sender" }
             }
         },
     ];
@@ -87,11 +91,13 @@ sealed class NotifierServer : McpServerBase
     {
         var title = GetString(args, "title") ?? "";
         var message = GetString(args, "message") ?? "";
+        var sender = GetString(args, "sender");
+        var task = GetString(args, "task");
         var type = GetString(args, "type") ?? "info";
         var sound = GetBool(args, "sound") ?? true;
         var dismissAfterMs = GetInt(args, "dismissAfterMs") ?? 5000;
 
-        var err = SendNotification(title, message, type, sound, dismissAfterMs);
+        var err = SendNotification(title, message, type, sound, dismissAfterMs, sender, task);
         if (err is not null)
             return new { _sent = false, _error = err, _fallback = "Print the notification in your reply instead." };
 
@@ -105,6 +111,8 @@ sealed class NotifierServer : McpServerBase
         var workDir = GetString(args, "workDir");
         var title = GetString(args, "title") ?? "Command Complete";
         var messageTemplate = GetString(args, "message");
+        var sender = GetString(args, "sender");
+        var task = GetString(args, "task");
         var type = GetString(args, "type") ?? "info";
         var sound = GetBool(args, "sound") ?? true;
         var timeoutMs = GetInt(args, "timeoutMs");
@@ -139,7 +147,7 @@ sealed class NotifierServer : McpServerBase
                 if (!exited)
                 {
                     try { proc.Kill(entireProcessTree: true); } catch { }
-                    SendNotification(title, $"Timed out after {timeoutMs}ms", "error", sound, 5000);
+                    SendNotification(title, $"Timed out after {timeoutMs}ms", "error", sound, 5000, sender, task);
                     return;
                 }
 
@@ -148,7 +156,7 @@ sealed class NotifierServer : McpServerBase
                 var finalType = code == 0 ? type : "error";
                 var finalMsg = messageTemplate
                     ?? $"Exit code: {code} (elapsed: {elapsed.TotalSeconds:F1}s)";
-                SendNotification(title, finalMsg, finalType, sound, 5000);
+                SendNotification(title, finalMsg, finalType, sound, 5000, sender, task);
             }
             catch { /* background fire-and-forget — best-effort */ }
         });
@@ -156,7 +164,8 @@ sealed class NotifierServer : McpServerBase
         return new { _pid = pid, _status = "running" };
     }
 
-    string? SendNotification(string title, string message, string type, bool sound, int dismissAfterMs)
+    string? SendNotification(string title, string message, string type, bool sound, int dismissAfterMs,
+        string? sender = null, string? task = null)
     {
         var (okType, okSound) = NormalizeType(type);
 
@@ -167,7 +176,7 @@ sealed class NotifierServer : McpServerBase
                 var helperPsi = new ProcessStartInfo
                 {
                     FileName = HelperPath,
-                    UseShellExecute = true,
+                    UseShellExecute = false,
                     CreateNoWindow = true,
                 };
                 helperPsi.ArgumentList.Add("--title");
@@ -176,6 +185,8 @@ sealed class NotifierServer : McpServerBase
                 helperPsi.ArgumentList.Add(message);
                 helperPsi.ArgumentList.Add("--type");
                 helperPsi.ArgumentList.Add(okType);
+                if (!string.IsNullOrEmpty(sender)) { helperPsi.ArgumentList.Add("--sender"); helperPsi.ArgumentList.Add(sender); }
+                if (!string.IsNullOrEmpty(task))   { helperPsi.ArgumentList.Add("--task");   helperPsi.ArgumentList.Add(task); }
                 if (!sound) helperPsi.ArgumentList.Add("--no-sound");
                 helperPsi.ArgumentList.Add("--dismiss-after-ms");
                 helperPsi.ArgumentList.Add(dismissAfterMs.ToString());
@@ -202,7 +213,7 @@ sealed class NotifierServer : McpServerBase
         {
             FileName = fileName,
             Arguments = arguments,
-            UseShellExecute = true,
+            UseShellExecute = false,
             CreateNoWindow = true,
         };
         return Process.Start(psi)!;
@@ -279,22 +290,52 @@ $textNodes.Item(1).AppendChild($template.CreateTextNode('{EscapePs(message)}')) 
             "Notifier — cross-platform desktop notification MCP server",
             "",
             "=== TOOLS ===",
-            "notify(title, message, type?, sound?, dismissAfterMs?, timeoutMs?) — one-shot notification",
-            "  type: info|error. sound: bool (default true). dismissAfterMs: auto-close (default 5000).",
-            "  Returns {_sent:true} or error with _fallback.",
+            "notify(title, message, sender, task?, type?, sound?, dismissAfterMs?, timeoutMs?)",
+            "  Send a desktop notification (slide-in toast with frosted glass).",
+            "  Use for: non-server tasks you completed (code review, analysis), important errors",
+            "  you discovered logically, async results the user should know about.",
+            "  NOTE: Slow server ops (CLI >5s, search/query >10s) auto-fire notifications",
+            "  via Commons — you don't need to call notify for those. Call notify explicitly",
+            "  for YOUR OWN work (analysis, review, reasoning) that the user should be aware of.",
+            "  MANDATORY: always provide 'sender' (your name) so the user knows which LLM.",
             "",
-            "notify_on_complete(command, args?, workDir?, title?, message?, type?, sound?, timeoutMs?)",
-            "  Fire-and-forget: spawns command, returns {_pid, _status:'running'} immediately.",
-            "  Background task waits for exit, then fires notification with exit code + elapsed time.",
-            "  title default: 'Command Complete'. type auto-set to 'error' if exit code != 0.",
-            "  timeoutMs: max wait for child process (no default = wait indefinitely).",
+            "notify_on_complete(command, args?, workDir?, title?, message?, sender, task?, type?, sound?, timeoutMs?)",
+            "  Fire-and-forget: wraps command execution + notification on exit.",
+            "  Returns {_pid, _status:'running'} instantly. Background thread fires toast when done.",
+            "  NOTE: For most CLI commands, CliSilentProxy.run() already auto-notifies (>5s).",
+            "  Use notify_on_complete when you need a custom message or when running commands",
+            "  through a mechanism that bypasses CliSilentProxy.",
+            "  MANDATORY: always provide 'sender' (your name).",
+            "",
+            "=== WHEN TO NOTIFY (MANDATORY RULES) ===",
+            "  NOTIFICATIONS ARE AUTO-FIRED for slow server operations (>5s CLI, >10s search/query).",
+            "  You do NOT need to call notify for those — Commons handles it transparently.",
+            "",
+            "  However, you STILL must explicitly call notify for:",
+            "  - Non-server tasks you completed (code review, analysis, summary prepared)",
+            "  - Any async result the user should know about even if no tool took >5s",
+            "  - Error conditions you detected logically (not via server timeout)",
+            "",
+            "  IDENTIFY YOURSELF — always provide 'sender' (e.g. 'Claude', 'Gemini', 'OpenCode').",
+            "  The user runs multiple LLMs side-by-side and needs to know who is notifying.",
+            "  Include 'task' to describe what you were doing for instant context-switching.",
+            "",
+            "  DO NOT notify when:",
+            "  - The operation completes synchronously and the user sees the result in your reply",
+            "  - For every micro-step of a larger task (aggregate notifications only)",
+            "  - The user is actively reading your response (they'll see the text)",
+            "  - Trivial read-only lookups (ls, grep, ping)",
+            "",
+            "=== TYPE SELECTION ===",
+            "  type: 'error' — build failures, test failures, unexpected errors, crash",
+            "  type: 'info' — success, completion, status updates",
+            "  notify_on_complete auto-sets type to 'error' when exit code != 0.",
             "",
             "=== UI ===",
-            "Notifications slide in from bottom-right with frosted-glass acrylic effect.",
-            "  Info: blue accent strip, soft tick sound.",
-            "  Error: red accent strip, shake animation, two-tone error sound.",
-            "  Completion: checkmark pop-in with green accent.",
-            "  Auto-dismiss: fade-out + upward drift.",
+            "Notifications stack upward from bottom-right. When a lower one dismisses,",
+            "  those above animate down to fill the gap (reflow). Each notification",
+            "  auto-dismisses after dismissAfterMs (default 5000ms, 0 = sticky).",
+            "  Fade-out: 400ms ease-in opacity drop with upward drift.",
             "",
             "=== SOUND ===",
             "Windows: WinRT toast chime (info) / critical alert (error)",

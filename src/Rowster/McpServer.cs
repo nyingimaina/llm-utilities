@@ -156,6 +156,7 @@ sealed class McpServer : McpServerBase, IDisposable
     }
 
     protected override string? GetHarnessInstructions() => null;
+    protected override int? AutoNotifyThresholdMs => 10000;
     protected override object GetInstructions()
     {
         var instr = new List<string>

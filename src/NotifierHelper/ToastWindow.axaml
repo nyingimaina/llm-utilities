@@ -2,11 +2,13 @@
         xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
         x:Class="NotifierHelper.ToastWindow"
         Width="360"
+        MinHeight="70"
+        MaxHeight="220"
+        SizeToContent="Height"
         WindowStartupLocation="Manual"
         SystemDecorations="None"
         ShowInTaskbar="False"
         Topmost="True"
-        TransparencyLevelHint="AcrylicBlur"
         CanResize="False"
         x:Name="Root">
   <Window.Styles>
@@ -22,7 +24,9 @@
 
   <Border x:Name="Card"
           CornerRadius="12"
-          Margin="8">
+          Margin="8"
+          Cursor="Hand"
+          PointerPressed="OnCardClicked">
     <Grid ColumnDefinitions="6, *">
       <Border x:Name="AccentStrip"
               Grid.Column="0"
@@ -32,7 +36,15 @@
       <StackPanel Grid.Column="1"
                   Margin="16,14,16,14"
                   HorizontalAlignment="Stretch">
-        <Grid ColumnDefinitions="*, Auto">
+        <TextBlock x:Name="SenderLabel"
+                   FontSize="11"
+                   Foreground="#99FFFFFF"
+                   TextTrimming="CharacterEllipsis"
+                   TextWrapping="NoWrap"
+                   IsVisible="False"/>
+
+        <Grid ColumnDefinitions="*, Auto"
+              Margin="0,2,0,0">
           <TextBlock x:Name="TitleText"
                      Grid.Column="0"
                      FontSize="14"
@@ -75,6 +87,14 @@
                   CornerRadius="1.5"
                   HorizontalAlignment="Left"/>
         </Border>
+
+        <TextBlock x:Name="ViewMoreText"
+                   FontSize="11"
+                   Foreground="#66FFFFFF"
+                   Text="View More →"
+                   Margin="0,8,0,0"
+                   HorizontalAlignment="Right"
+                   IsVisible="False"/>
       </StackPanel>
     </Grid>
   </Border>

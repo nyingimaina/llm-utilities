@@ -1,5 +1,5 @@
 #define MyAppName      "LLM Utilities"
-#define MyAppVersion   "1.23.0"
+#define MyAppVersion   "1.27.0"
 #define MyAppPublisher "Savanna HerdIQ"
 #define PublishDir     "publish"
 #define ReadmeFile     "README.md"
@@ -27,6 +27,7 @@ Name: "english"; MessagesFile: "compiler:Default.isl"
 Source: "{#PublishDir}\*.exe";                          DestDir: "{app}"; Flags: ignoreversion
 Source: "{#PublishDir}\*.dll";                          DestDir: "{app}"; Flags: ignoreversion skipifsourcedoesntexist
 Source: "{#PublishDir}\*.json";                         DestDir: "{app}"; Flags: ignoreversion skipifsourcedoesntexist
+Source: "{#PublishDir}\runtimes\*";                     DestDir: "{app}\runtimes"; Flags: ignoreversion skipifsourcedoesntexist recursesubdirs createallsubdirs
 Source: "{#ReadmeFile}";                                DestDir: "{app}"; Flags: ignoreversion
 
 [Registry]
@@ -42,7 +43,8 @@ Name: "{group}\LLM Utilities README"; Filename: "{app}\README.md"
 [Code]
 
 var
-  ClaudePage: TWizardPage;
+  McpPage: TWizardPage;
+  LlmPage: TWizardPage;
   ChkSelectAll: TNewCheckBox;
   ChkRowster: TNewCheckBox;
   ChkFReader: TNewCheckBox;
@@ -172,147 +174,153 @@ begin
   ChkZed.Checked := ChkLlmSelectAll.Checked;
 end;
 
-// ── Custom wizard page: MCP server checkboxes (opt-in) ─────────────────────────
+// ── Custom wizard page: MCP server checkboxes ────────────────────────────────
 
 procedure InitializeWizard;
 begin
-  ClaudePage := CreateCustomPage(wpSelectTasks,
-    'MCP Integration',
-    'Select which MCP servers to register.');
+  McpPage := CreateCustomPage(wpSelectTasks,
+    'MCP Servers',
+    'Select which MCP servers to install and register.');
 
-  ChkSelectAll := TNewCheckBox.Create(ClaudePage);
-  ChkSelectAll.Parent := ClaudePage.Surface;
+  ChkSelectAll := TNewCheckBox.Create(McpPage);
+  ChkSelectAll.Parent := McpPage.Surface;
   ChkSelectAll.Left := 8;
   ChkSelectAll.Top := 16;
-  ChkSelectAll.Width := ClaudePage.SurfaceWidth - 16;
+  ChkSelectAll.Width := McpPage.SurfaceWidth - 16;
   ChkSelectAll.Height := 17;
   ChkSelectAll.Caption := 'Select all MCP servers';
   ChkSelectAll.Checked := True;
   ChkSelectAll.OnClick := @MspSelectAllClick;
 
-  ChkRowster := TNewCheckBox.Create(ClaudePage);
-  ChkRowster.Parent := ClaudePage.Surface;
+  ChkRowster := TNewCheckBox.Create(McpPage);
+  ChkRowster.Parent := McpPage.Surface;
   ChkRowster.Left := 22;
   ChkRowster.Top := ChkSelectAll.Top + ChkSelectAll.Height + 8;
-  ChkRowster.Width := ClaudePage.SurfaceWidth - 30;
+  ChkRowster.Width := McpPage.SurfaceWidth - 30;
   ChkRowster.Height := 17;
   ChkRowster.Caption := 'Register Rowster (MySQL database query tool)';
   ChkRowster.Checked := True;
 
-  ChkFReader := TNewCheckBox.Create(ClaudePage);
-  ChkFReader.Parent := ClaudePage.Surface;
+  ChkFReader := TNewCheckBox.Create(McpPage);
+  ChkFReader.Parent := McpPage.Surface;
   ChkFReader.Left := 22;
   ChkFReader.Top := ChkRowster.Top + ChkRowster.Height + 8;
-  ChkFReader.Width := ClaudePage.SurfaceWidth - 30;
+  ChkFReader.Width := McpPage.SurfaceWidth - 30;
   ChkFReader.Height := 17;
   ChkFReader.Caption := 'Register FReader (file reader and text search)';
   ChkFReader.Checked := True;
 
-  ChkCliSilentProxy := TNewCheckBox.Create(ClaudePage);
-  ChkCliSilentProxy.Parent := ClaudePage.Surface;
+  ChkCliSilentProxy := TNewCheckBox.Create(McpPage);
+  ChkCliSilentProxy.Parent := McpPage.Surface;
   ChkCliSilentProxy.Left := 22;
   ChkCliSilentProxy.Top := ChkFReader.Top + ChkFReader.Height + 8;
-  ChkCliSilentProxy.Width := ClaudePage.SurfaceWidth - 30;
+  ChkCliSilentProxy.Width := McpPage.SurfaceWidth - 30;
   ChkCliSilentProxy.Height := 17;
   ChkCliSilentProxy.Caption := 'Register CliSilentProxy (shell command proxy)';
   ChkCliSilentProxy.Checked := True;
 
-  ChkFWriter := TNewCheckBox.Create(ClaudePage);
-  ChkFWriter.Parent := ClaudePage.Surface;
+  ChkFWriter := TNewCheckBox.Create(McpPage);
+  ChkFWriter.Parent := McpPage.Surface;
   ChkFWriter.Left := 22;
   ChkFWriter.Top := ChkCliSilentProxy.Top + ChkCliSilentProxy.Height + 8;
-  ChkFWriter.Width := ClaudePage.SurfaceWidth - 30;
+  ChkFWriter.Width := McpPage.SurfaceWidth - 30;
   ChkFWriter.Height := 17;
   ChkFWriter.Caption := 'Register FWriter (validated code editor)';
   ChkFWriter.Checked := True;
 
-  ChkContractGenerator := TNewCheckBox.Create(ClaudePage);
-  ChkContractGenerator.Parent := ClaudePage.Surface;
+  ChkContractGenerator := TNewCheckBox.Create(McpPage);
+  ChkContractGenerator.Parent := McpPage.Surface;
   ChkContractGenerator.Left := 22;
   ChkContractGenerator.Top := ChkFWriter.Top + ChkFWriter.Height + 8;
-  ChkContractGenerator.Width := ClaudePage.SurfaceWidth - 30;
+  ChkContractGenerator.Width := McpPage.SurfaceWidth - 30;
   ChkContractGenerator.Height := 17;
   ChkContractGenerator.Caption := 'Register ContractGenerator (C# to TypeScript interface generator)';
   ChkContractGenerator.Checked := True;
 
-  ChkCodeNavigator := TNewCheckBox.Create(ClaudePage);
-  ChkCodeNavigator.Parent := ClaudePage.Surface;
+  ChkCodeNavigator := TNewCheckBox.Create(McpPage);
+  ChkCodeNavigator.Parent := McpPage.Surface;
   ChkCodeNavigator.Left := 22;
   ChkCodeNavigator.Top := ChkContractGenerator.Top + ChkContractGenerator.Height + 8;
-  ChkCodeNavigator.Width := ClaudePage.SurfaceWidth - 30;
+  ChkCodeNavigator.Width := McpPage.SurfaceWidth - 30;
   ChkCodeNavigator.Height := 17;
   ChkCodeNavigator.Caption := 'Register CodeNavigator (semantic code navigation for C# and TS)';
   ChkCodeNavigator.Checked := True;
 
-  ChkNotifier := TNewCheckBox.Create(ClaudePage);
-  ChkNotifier.Parent := ClaudePage.Surface;
+  ChkNotifier := TNewCheckBox.Create(McpPage);
+  ChkNotifier.Parent := McpPage.Surface;
   ChkNotifier.Left := 22;
   ChkNotifier.Top := ChkCodeNavigator.Top + ChkCodeNavigator.Height + 8;
-  ChkNotifier.Width := ClaudePage.SurfaceWidth - 30;
+  ChkNotifier.Width := McpPage.SurfaceWidth - 30;
   ChkNotifier.Height := 17;
   ChkNotifier.Caption := 'Register Notifier (desktop notification service)';
   ChkNotifier.Checked := True;
 
-  ChkLlmSelectAll := TNewCheckBox.Create(ClaudePage);
-  ChkLlmSelectAll.Parent := ClaudePage.Surface;
+  // ── Custom wizard page: LLM target checkboxes ────────────────────────────────
+
+  LlmPage := CreateCustomPage(McpPage.ID,
+    'LLM Integration',
+    'Select which LLM CLI tools to register MCP servers with.');
+
+  ChkLlmSelectAll := TNewCheckBox.Create(LlmPage);
+  ChkLlmSelectAll.Parent := LlmPage.Surface;
   ChkLlmSelectAll.Left := 8;
-  ChkLlmSelectAll.Top := ChkNotifier.Top + ChkNotifier.Height + 14;
-  ChkLlmSelectAll.Width := ClaudePage.SurfaceWidth - 16;
+  ChkLlmSelectAll.Top := 16;
+  ChkLlmSelectAll.Width := LlmPage.SurfaceWidth - 16;
   ChkLlmSelectAll.Height := 17;
   ChkLlmSelectAll.Caption := 'Register with all supported LLMs';
   ChkLlmSelectAll.Checked := True;
   ChkLlmSelectAll.OnClick := @LlmSelectAllClick;
 
-  ChkClaudeCode := TNewCheckBox.Create(ClaudePage);
-  ChkClaudeCode.Parent := ClaudePage.Surface;
+  ChkClaudeCode := TNewCheckBox.Create(LlmPage);
+  ChkClaudeCode.Parent := LlmPage.Surface;
   ChkClaudeCode.Left := 22;
   ChkClaudeCode.Top := ChkLlmSelectAll.Top + ChkLlmSelectAll.Height + 8;
-  ChkClaudeCode.Width := ClaudePage.SurfaceWidth - 30;
+  ChkClaudeCode.Width := LlmPage.SurfaceWidth - 30;
   ChkClaudeCode.Height := 17;
   ChkClaudeCode.Caption := 'Claude Code (~/.claude.json)';
   ChkClaudeCode.Checked := True;
 
-  ChkGemini := TNewCheckBox.Create(ClaudePage);
-  ChkGemini.Parent := ClaudePage.Surface;
+  ChkGemini := TNewCheckBox.Create(LlmPage);
+  ChkGemini.Parent := LlmPage.Surface;
   ChkGemini.Left := 22;
   ChkGemini.Top := ChkClaudeCode.Top + ChkClaudeCode.Height + 8;
-  ChkGemini.Width := ClaudePage.SurfaceWidth - 30;
+  ChkGemini.Width := LlmPage.SurfaceWidth - 30;
   ChkGemini.Height := 17;
   ChkGemini.Caption := 'Gemini CLI (~/.gemini/settings.json)';
   ChkGemini.Checked := True;
 
-  ChkOpenCode := TNewCheckBox.Create(ClaudePage);
-  ChkOpenCode.Parent := ClaudePage.Surface;
+  ChkOpenCode := TNewCheckBox.Create(LlmPage);
+  ChkOpenCode.Parent := LlmPage.Surface;
   ChkOpenCode.Left := 22;
   ChkOpenCode.Top := ChkGemini.Top + ChkGemini.Height + 8;
-  ChkOpenCode.Width := ClaudePage.SurfaceWidth - 30;
+  ChkOpenCode.Width := LlmPage.SurfaceWidth - 30;
   ChkOpenCode.Height := 17;
   ChkOpenCode.Caption := 'OpenCode CLI (~/.config/opencode/opencode.json)';
   ChkOpenCode.Checked := True;
 
-  ChkCursor := TNewCheckBox.Create(ClaudePage);
-  ChkCursor.Parent := ClaudePage.Surface;
+  ChkCursor := TNewCheckBox.Create(LlmPage);
+  ChkCursor.Parent := LlmPage.Surface;
   ChkCursor.Left := 22;
   ChkCursor.Top := ChkOpenCode.Top + ChkOpenCode.Height + 8;
-  ChkCursor.Width := ClaudePage.SurfaceWidth - 30;
+  ChkCursor.Width := LlmPage.SurfaceWidth - 30;
   ChkCursor.Height := 17;
   ChkCursor.Caption := 'Cursor (~/.cursor/mcp.json)';
   ChkCursor.Checked := True;
 
-  ChkWindsurf := TNewCheckBox.Create(ClaudePage);
-  ChkWindsurf.Parent := ClaudePage.Surface;
+  ChkWindsurf := TNewCheckBox.Create(LlmPage);
+  ChkWindsurf.Parent := LlmPage.Surface;
   ChkWindsurf.Left := 22;
   ChkWindsurf.Top := ChkCursor.Top + ChkCursor.Height + 8;
-  ChkWindsurf.Width := ClaudePage.SurfaceWidth - 30;
+  ChkWindsurf.Width := LlmPage.SurfaceWidth - 30;
   ChkWindsurf.Height := 17;
   ChkWindsurf.Caption := 'Windsurf (~/.codeium/windsurf/mcp_config.json)';
   ChkWindsurf.Checked := True;
 
-  ChkZed := TNewCheckBox.Create(ClaudePage);
-  ChkZed.Parent := ClaudePage.Surface;
+  ChkZed := TNewCheckBox.Create(LlmPage);
+  ChkZed.Parent := LlmPage.Surface;
   ChkZed.Left := 22;
   ChkZed.Top := ChkWindsurf.Top + ChkWindsurf.Height + 8;
-  ChkZed.Width := ClaudePage.SurfaceWidth - 30;
+  ChkZed.Width := LlmPage.SurfaceWidth - 30;
   ChkZed.Height := 17;
   ChkZed.Caption := 'Zed (~/.config/zed/settings.json)';
   ChkZed.Checked := True;
