@@ -1,0 +1,81 @@
+<Window xmlns="https://github.com/avaloniaui"
+        xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+        x:Class="NotifierHelper.ToastWindow"
+        Width="360"
+        WindowStartupLocation="Manual"
+        SystemDecorations="None"
+        ShowInTaskbar="False"
+        Topmost="True"
+        TransparencyLevelHint="AcrylicBlur"
+        CanResize="False"
+        x:Name="Root">
+  <Window.Styles>
+    <Style Selector="Window#Root">
+      <Setter Property="Background" Value="Transparent"/>
+      <Setter Property="RenderTransform">
+        <Setter.Value>
+          <TranslateTransform X="400" Y="0"/>
+        </Setter.Value>
+      </Setter>
+    </Style>
+  </Window.Styles>
+
+  <Border x:Name="Card"
+          CornerRadius="12"
+          Margin="8">
+    <Grid ColumnDefinitions="6, *">
+      <Border x:Name="AccentStrip"
+              Grid.Column="0"
+              Width="6"
+              CornerRadius="3,0,0,3"/>
+
+      <StackPanel Grid.Column="1"
+                  Margin="16,14,16,14"
+                  HorizontalAlignment="Stretch">
+        <Grid ColumnDefinitions="*, Auto">
+          <TextBlock x:Name="TitleText"
+                     Grid.Column="0"
+                     FontSize="14"
+                     FontWeight="SemiBold"
+                     Foreground="#FFFFFF"
+                     TextTrimming="CharacterEllipsis"
+                     TextWrapping="NoWrap"/>
+
+          <Border x:Name="IconBox"
+                  Grid.Column="1"
+                  Width="24"
+                  Height="24"
+                  CornerRadius="12"
+                  Opacity="0"
+                  Margin="8,0,0,0">
+            <TextBlock x:Name="IconText"
+                       FontSize="14"
+                       FontWeight="Bold"
+                       HorizontalAlignment="Center"
+                       VerticalAlignment="Center"/>
+          </Border>
+        </Grid>
+
+        <TextBlock x:Name="MessageText"
+                   FontSize="13"
+                   Foreground="#CCFFFFFF"
+                   TextWrapping="Wrap"
+                   Margin="0,6,0,0"
+                   TextTrimming="WordEllipsis"
+                   MaxHeight="60"/>
+
+        <Border x:Name="ProgressBar"
+                Height="3"
+                CornerRadius="1.5"
+                Margin="0,10,0,0"
+                IsVisible="False">
+          <Border x:Name="ProgressFill"
+                  Width="0"
+                  Height="3"
+                  CornerRadius="1.5"
+                  HorizontalAlignment="Left"/>
+        </Border>
+      </StackPanel>
+    </Grid>
+  </Border>
+</Window>

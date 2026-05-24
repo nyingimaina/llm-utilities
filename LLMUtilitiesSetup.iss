@@ -1,5 +1,5 @@
 #define MyAppName      "LLM Utilities"
-#define MyAppVersion   "1.22.0"
+#define MyAppVersion   "1.23.0"
 #define MyAppPublisher "Savanna HerdIQ"
 #define PublishDir     "publish"
 #define ReadmeFile     "README.md"
@@ -50,6 +50,7 @@ var
   ChkFWriter: TNewCheckBox;
   ChkContractGenerator: TNewCheckBox;
   ChkCodeNavigator: TNewCheckBox;
+  ChkNotifier: TNewCheckBox;
   ChkLlmSelectAll: TNewCheckBox;
   ChkClaudeCode: TNewCheckBox;
   ChkGemini: TNewCheckBox;
@@ -158,6 +159,7 @@ begin
   ChkFWriter.Checked := ChkSelectAll.Checked;
   ChkContractGenerator.Checked := ChkSelectAll.Checked;
   ChkCodeNavigator.Checked := ChkSelectAll.Checked;
+  ChkNotifier.Checked := ChkSelectAll.Checked;
 end;
 
 procedure LlmSelectAllClick(Sender: TObject);
@@ -242,10 +244,19 @@ begin
   ChkCodeNavigator.Caption := 'Register CodeNavigator (semantic code navigation for C# and TS)';
   ChkCodeNavigator.Checked := True;
 
+  ChkNotifier := TNewCheckBox.Create(ClaudePage);
+  ChkNotifier.Parent := ClaudePage.Surface;
+  ChkNotifier.Left := 22;
+  ChkNotifier.Top := ChkCodeNavigator.Top + ChkCodeNavigator.Height + 8;
+  ChkNotifier.Width := ClaudePage.SurfaceWidth - 30;
+  ChkNotifier.Height := 17;
+  ChkNotifier.Caption := 'Register Notifier (desktop notification service)';
+  ChkNotifier.Checked := True;
+
   ChkLlmSelectAll := TNewCheckBox.Create(ClaudePage);
   ChkLlmSelectAll.Parent := ClaudePage.Surface;
   ChkLlmSelectAll.Left := 8;
-  ChkLlmSelectAll.Top := ChkCodeNavigator.Top + ChkCodeNavigator.Height + 14;
+  ChkLlmSelectAll.Top := ChkNotifier.Top + ChkNotifier.Height + 14;
   ChkLlmSelectAll.Width := ClaudePage.SurfaceWidth - 16;
   ChkLlmSelectAll.Height := 17;
   ChkLlmSelectAll.Caption := 'Register with all supported LLMs';
@@ -344,12 +355,14 @@ begin
     SummaryLines.Lines.Add('✓ FWriter.exe installed');
     SummaryLines.Lines.Add('✓ ContractGenerator.exe installed');
     SummaryLines.Lines.Add('✓ CodeNavigator.exe installed');
+    SummaryLines.Lines.Add('✓ Notifier.exe installed');
+    SummaryLines.Lines.Add('✓ NotifierHelper.exe installed');
     SummaryLines.Lines.Add('✓ McpRegistrar.exe installed');
     SummaryLines.Lines.Add('✓ LLMUtilities.Commons.dll installed');
     SummaryLines.Lines.Add('✓ LLMUtilities added to system PATH');
 
     // ── MCP registration (Claude Code + optionally Gemini CLI) ─────────────────
-    if (not ChkRowster.Checked) and (not ChkFReader.Checked) and (not ChkCliSilentProxy.Checked) and (not ChkFWriter.Checked) and (not ChkContractGenerator.Checked) and (not ChkCodeNavigator.Checked) then
+    if (not ChkRowster.Checked) and (not ChkFReader.Checked) and (not ChkCliSilentProxy.Checked) and (not ChkFWriter.Checked) and (not ChkContractGenerator.Checked) and (not ChkCodeNavigator.Checked) and (not ChkNotifier.Checked) then
     begin
       SummaryLines.Lines.Add('');
       SummaryLines.Lines.Add('○ MCP registration skipped');
@@ -370,6 +383,8 @@ begin
         Args := Args + ' --register-contractgenerator --contractgenerator-path "' + ExpandConstant('{app}\ContractGenerator.exe') + '"';
       if ChkCodeNavigator.Checked then
         Args := Args + ' --register-codenavigator --codenavigator-path "' + ExpandConstant('{app}\CodeNavigator.exe') + '"';
+      if ChkNotifier.Checked then
+        Args := Args + ' --register-notifier --notifier-path "' + ExpandConstant('{app}\Notifier.exe') + '"';
       if not ChkClaudeCode.Checked then
         Args := Args + ' --skip-claude';
       if ChkGemini.Checked then
@@ -399,6 +414,8 @@ begin
           SummaryLines.Lines.Add('✓ ContractGenerator registered with Claude Code');
         if ChkCodeNavigator.Checked then
           SummaryLines.Lines.Add('✓ CodeNavigator registered with Claude Code');
+        if ChkNotifier.Checked then
+          SummaryLines.Lines.Add('✓ Notifier registered with Claude Code');
         SummaryLines.Lines.Add('');
         SummaryLines.Lines.Add('  Also registered:');
         if ChkGemini.Checked then
