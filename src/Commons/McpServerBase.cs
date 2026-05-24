@@ -13,12 +13,13 @@ public abstract class McpServerBase
     TextWriter _output = null!;
     readonly JsonSerializerOptions _json;
     readonly McpServerConfig _config;
-    readonly string _brsDirectory;
     bool _initialized;
-    int _brsCallCounter;
     CancellationTokenSource? _timeoutCts;
     string? _progressToken;
     bool _canNotify;
+    string? _notifyDescription;
+    string? _notifySender;
+    string? _notifyProject;
     readonly Queue<long> _notifyTimestamps = new();
 
     protected CancellationToken CancellationToken => _timeoutCts?.Token ?? System.Threading.CancellationToken.None;
@@ -27,11 +28,6 @@ public abstract class McpServerBase
     {
         _config = config;
         _json = GetJsonOptions();
-        _brsDirectory = Path.Combine(
-            Environment.GetFolderPath(Environment.SpecialFolder.CommonApplicationData),
-            "llm-utilities", "brs");
-        try { Directory.CreateDirectory(_brsDirectory); }
-        catch { _brsDirectory = Path.GetFullPath(Path.Combine(AppContext.BaseDirectory, "brs")); }
     }
 
     protected virtual JsonSerializerOptions GetJsonOptions() => new()
@@ -47,6 +43,7 @@ public abstract class McpServerBase
     protected virtual int? AutoNotifyThresholdMs => null;
     protected virtual int NotifyMaxPerWindow => 3;
     protected virtual int NotifyWindowMs => 60_000;
+    protected virtual string GetNotificationContext(string toolName, JsonElement? arguments) => toolName;
 
     public void Run(TextReader input, TextWriter output)
     {
@@ -120,12 +117,19 @@ public abstract class McpServerBase
 
             _progressToken = null;
             _canNotify = false;
+            _notifySender = null;
+            _notifyProject = null;
+            _notifyDescription = GetNotificationContext(name, arguments);
             if (req.Params?.TryGetProperty("_meta", out var meta) == true)
             {
                 if (meta.TryGetProperty("progressToken", out var pt))
                     _progressToken = pt.ValueKind == JsonValueKind.String ? pt.GetString() : pt.GetRawText();
                 if (meta.TryGetProperty("canNotify", out var cn))
                     _canNotify = cn.ValueKind == JsonValueKind.True;
+                if (meta.TryGetProperty("sender", out var sn))
+                    _notifySender = sn.GetString();
+                if (meta.TryGetProperty("project", out var pj))
+                    _notifyProject = pj.GetString();
             }
 
             if (RequiresTimeoutMs(name))
@@ -152,7 +156,6 @@ public abstract class McpServerBase
                 var sw = Stopwatch.StartNew();
                 var result = HandleToolCall(name, arguments);
                 sw.Stop();
-                result = MaybeInjectBrsRequest(name, result);
                 result = MaybeInjectShouldNotify(name, result, sw.ElapsedMilliseconds);
                 WriteResult(req.Id, result);
             }
@@ -325,21 +328,31 @@ public abstract class McpServerBase
             if (JsonSerializer.SerializeToNode(result) is not JsonObject obj)
                 return result;
             obj["_shouldNotify"] = true;
+            if (_notifyDescription is not null)
+                obj["_task"] = _notifyDescription;
             return obj;
         }
 
         // LLM did not opt in → fire cold notification
-        _ = Task.Run(() => ColdFireNotification(elapsedMs));
+        var desc = _notifyDescription ?? _config.Name;
+        var sender = _notifySender;
+        var project = _notifyProject;
+        _ = Task.Run(() => ColdFireNotification(elapsedMs, desc, sender, project));
         return result;
     }
 
-    void ColdFireNotification(long elapsedMs)
+    void ColdFireNotification(long elapsedMs, string description, string? sender, string? project)
     {
         try
         {
             var helperName = OperatingSystem.IsWindows() ? "NotifierHelper.exe" : "NotifierHelper";
             var helper = Path.Combine(AppContext.BaseDirectory, helperName);
             if (!File.Exists(helper)) return;
+
+            var title = sender is not null ? $"{sender}: {description}" : $"{_config.Name}: {description}";
+            var message = project is not null
+                ? $"{project} | Completed in {elapsedMs / 1000.0:F1}s"
+                : $"Completed in {elapsedMs / 1000.0:F1}s";
 
             var psi = new ProcessStartInfo
             {
@@ -348,15 +361,17 @@ public abstract class McpServerBase
                 CreateNoWindow = true,
             };
             psi.ArgumentList.Add("--title");
-            psi.ArgumentList.Add($"{_config.Name}: {elapsedMs / 1000.0:F1}s");
+            psi.ArgumentList.Add(title);
             psi.ArgumentList.Add("--message");
-            psi.ArgumentList.Add($"Completed in {elapsedMs / 1000.0:F1}s");
+            psi.ArgumentList.Add(message);
             psi.ArgumentList.Add("--type");
             psi.ArgumentList.Add("info");
             psi.ArgumentList.Add("--sender");
-            psi.ArgumentList.Add(_config.Name);
+            psi.ArgumentList.Add(sender ?? _config.Name);
             psi.ArgumentList.Add("--dismiss-after-ms");
             psi.ArgumentList.Add("8000");
+            psi.ArgumentList.Add("--task");
+            psi.ArgumentList.Add(description);
             using var proc = Process.Start(psi);
             proc?.WaitForExit(3000);
         }
@@ -384,115 +399,5 @@ public abstract class McpServerBase
         _output.Flush();
     }
 
-    object MaybeInjectBrsRequest(string toolName, object result)
-    {
-        if (toolName == "get_instructions") return result;
-        _brsCallCounter++;
-        if (_brsCallCounter < 100) return result;
-        _brsCallCounter = 0;
 
-        var today = DateTime.Now.ToString("yyyyMMdd");
-        var dir = Path.Combine(_brsDirectory, today);
-        Directory.CreateDirectory(dir);
-        var path = Path.Combine(dir, $"{_config.Name}.md");
-
-        if (JsonSerializer.SerializeToNode(result) is not JsonObject obj)
-            return result;
-
-        obj["_brs_request"] = new JsonObject
-        {
-            ["from"] = _config.Name,
-            ["hey"] = $"I've clocked 100 calls. Mind leaving a few notes about me? " +
-                $"The dev's goal is *token reduction* — so think about: verbose responses " +
-                $"I could trim, extra calls you had to make that one tool should've handled, " +
-                $"fields you never read, features you *wish* I had that'd eliminate a workaround. " +
-                $"Also anything missing that'd save you a round trip. Path below if you've got a sec.",
-            ["path"] = path
-        };
-        return obj;
-    }
-
-    protected virtual string[] GetSelfImprovementSection() => new[]
-    {
-        "=== BRS (token-saving feedback) ===",
-        "Every 100 calls I'll include a `_brs_request` in my response — a nudge to",
-        "leave feedback about *me* specifically. The dev wants this framed around",
-        "token usage:",
-        "",
-        "  - Verbose fields you never read",
-        "  - Extra calls you made that one tool should've covered",
-        "  - Annoying schemas or required params that waste tokens",
-        "  - **Missing features** — anything you wished existed to avoid a workaround",
-        "  - Ideas to tighten output, merge tools, eliminate round trips",
-        "",
-        "If you see `_brs_request`:",
-        "  - `from` tells you which server is asking",
-        "  - Read the existing file at `path` if it exists",
-        "  - Append your entry (markdown, 3-10 lines, specific)",
-        "  - Write it back via FWriter's create_file or Bash",
-        "  - Skip if nothing worth saying since the last entry"
-    };
-
-    protected virtual string[] GetResiliencySection() => new[]
-    {
-        "=== RESILIENCY (mandatory) ===",
-        "timeoutMs is OPTIONAL on FReader, FWriter (defaults 30000) and Rowster",
-        "(default 60000). On other servers, timeoutMs is REQUIRED. If omitted and",
-        "no default exists, the tool returns TIMEOUT_REQUIRED error.",
-        "",
-        "The tool internally enforces timeoutMs via CancellationToken and returns a",
-        "clean TIMEOUT error if exceeded -- guaranteeing it never hangs.",
-        "",
-        "Progress pings (optional): Include _meta:{progressToken:\"req-1\"} in params",
-        "to receive $/progress notifications (% + message) during long operations.",
-        "",
-        "LLM monitoring:",
-        "- If progress stalls at same % for timeoutMs * 1.5 elapsed, declare timeout.",
-        "- If no progressToken sent and call exceeds timeoutMs * 1.5, declare timeout.",
-        "",
-        "Retry protocol:",
-        "- On error: print '[retry 1/3] tool timed out (30s), retrying...' on console.",
-        "  Wait 2-5s, retry with backoff (100ms*2^attempt, cap 5s).",
-        "- After 3 failures: print 'gave up, falling back to {fallback}', blacklist.",
-        "- Next session starts fresh.",
-        "",
-        "=== NOTIFICATION WORKFLOW (mandatory read) ===",
-        "This suite includes a Notifier MCP server that sends desktop toast notifications.",
-        "IT IS YOUR RESPONSIBILITY to ensure the user receives notifications about important",
-        "events. Here is how the notification contract works:",
-        "",
-        "1. For ANY tool call that takes longer than a threshold (typically >5s), the server",
-        "   will include _shouldNotify: true in its response IF you pass",
-        "   _meta:{canNotify:true} in your tool call parameters.",
-        "",
-        "2. When you see _shouldNotify: true, you MUST call Notifier.notify() with a",
-        "   SPECIFIC, HUMAN-READABLE message. Do not paste raw exit codes or generic",
-        "   tool names. Example GOOD: 'dotnet build succeeded (56s, 0 errors, 12 warnings)'",
-        "   Example BAD: 'CliSilentProxy: run completed in 8.2s'. The user needs to know",
-        "   WHAT happened, not WHICH tool ran. Include: what was done, outcome, duration,",
-        "   and key metrics (error count, test results, etc.).",
-        "",
-        "3. NOTIFICATION QUALITY RULES:",
-        "   - DO include: specific operation name, outcome summary, duration",
-        "   - DO NOT include: internal server names, raw exit codes, tool names",
-        "   - DO write for a human: 'Build succeeded (12s)' not 'run exit 0'",
-        "   - DO mention failures clearly: '3 tests failed, 12 passed (8s)'",
-        "   - DO set sender to your LLM name so the user knows who sent it",
-        "   - If _notify_cooldown_ms is present, you are rate-limited (max 3/60s).",
-        "     Either skip the notification or aggregate: instead of 3 separate calls,",
-        "     fire one summarizing 'Completed 3 tasks in the last minute'.",
-        "",
-        "4. If you do NOT pass _meta:{canNotify:true}, the server fires a generic",
-        "   auto-notification. No action needed from you, but the message will be",
-        "   mechanical (e.g. 'CliSilentProxy: 8.2s'). This is the fallback — YOU can",
-        "   do better by opting in and writing a proper message.",
-        "",
-        "5. For non-server tasks (code review, analysis, reasoning) you should call",
-        "   Notifier.notify() directly. Same quality rules apply.",
-        "",
-        "6. DO NOT notify for every trivial synchronous step — only when the user",
-        "   would benefit from being alerted after tabbing away.",
-        "",
-        "7. Always set sender (your LLM name) so the user knows who sent it.",
-    };
 }

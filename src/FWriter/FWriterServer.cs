@@ -250,9 +250,6 @@ sealed class FWriterServer : McpServerBase
             "validate: read-only, zero risk.",
             "",
         };
-        instr.AddRange(GetResiliencySection());
-        instr.Add("");
-        instr.AddRange(GetSelfImprovementSection());
         instr.Add("");
         instr.Add("=== COMPACT FIELDS ===");
         instr.Add("_success/_error = result   _old_body = previous body content");

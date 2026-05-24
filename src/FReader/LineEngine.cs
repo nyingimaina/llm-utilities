@@ -133,11 +133,16 @@ public static class LineEngine
 
     static Dictionary<string, object?> ResultDict(string[] lines, int totalLines, bool truncated, int? nextLineStart = null, int? nextLineEnd = null)
     {
-        var result = new Dictionary<string, object?>
+        var result = new Dictionary<string, object?>();
+        if (lines.Length <= 50)
         {
-            ["_h"] = new[] { "line", "text" },
-            ["_r"] = lines
-        };
+            result["_h"] = lines;
+        }
+        else
+        {
+            result["_h"] = new[] { "line", "text" };
+            result["_r"] = lines;
+        }
         if (truncated)
         {
             result["_truncated"] = true;

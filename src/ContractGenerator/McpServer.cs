@@ -185,9 +185,7 @@ sealed class McpServer : McpServerBase
             "=== OUTPUT ===",
             "Returns TypeScript as string. Does NOT write files - LLM writes via standard tools.",
         };
-        instr.AddRange(GetResiliencySection());
         instr.Add("");
-        instr.AddRange(GetSelfImprovementSection());
         return new { _h = instr.ToArray() };
     }
 }

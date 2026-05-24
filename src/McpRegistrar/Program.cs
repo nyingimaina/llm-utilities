@@ -39,9 +39,6 @@ static void Run(string[] args)
     var regRowster = false;
     var regFReader = false;
     var regCliSilentProxy = false;
-    var regFWriter = false;
-    var regContractGenerator = false;
-    var regCodeNavigator = false;
     var regNotifier = false;
     var regClaude = true;
     var regGemini = false;
@@ -53,9 +50,6 @@ static void Run(string[] args)
     string? rowsterPath = null;
     string? freaderPath = null;
     string? cliSilentProxyPath = null;
-    string? fwriterPath = null;
-    string? contractGeneratorPath = null;
-    string? codeNavigatorPath = null;
     string? notifierPath = null;
     for (int i = 0; i < args.Length; i++)
     {
@@ -64,9 +58,6 @@ static void Run(string[] args)
             case "--register-rowster": regRowster = true; break;
             case "--register-freader": regFReader = true; break;
             case "--register-clisilentproxy": regCliSilentProxy = true; break;
-            case "--register-fwriter": regFWriter = true; break;
-            case "--register-contractgenerator": regContractGenerator = true; break;
-            case "--register-codenavigator": regCodeNavigator = true; break;
             case "--register-notifier": regNotifier = true; break;
 
             case "--skip-claude": regClaude = false; break;
@@ -78,9 +69,6 @@ static void Run(string[] args)
             case "--rowster-path"       when i + 1 < args.Length: rowsterPath       = args[++i]; break;
             case "--freader-path"       when i + 1 < args.Length: freaderPath       = args[++i]; break;
             case "--clisilentproxy-path" when i + 1 < args.Length: cliSilentProxyPath = args[++i]; break;
-            case "--fwriter-path"       when i + 1 < args.Length: fwriterPath       = args[++i]; break;
-            case "--contractgenerator-path" when i + 1 < args.Length: contractGeneratorPath = args[++i]; break;
-            case "--codenavigator-path"     when i + 1 < args.Length: codeNavigatorPath     = args[++i]; break;
             case "--notifier-path"          when i + 1 < args.Length: notifierPath          = args[++i]; break;
             case "--uninstall": uninstall = true; break;
             default:
@@ -89,15 +77,15 @@ static void Run(string[] args)
         }
     }
 
-    if (uninstall && (regRowster || regFReader || regCliSilentProxy || regFWriter || regContractGenerator || regCodeNavigator || regNotifier || regGemini || regOpenCode || regCursor || regWindsurf || regZed))
+    if (uninstall && (regRowster || regFReader || regCliSilentProxy || regNotifier || regGemini || regOpenCode || regCursor || regWindsurf || regZed))
     {
         Log.Error("Cannot combine --uninstall with --register-* flags");
         Environment.Exit(1);
     }
 
-    if (!uninstall && !regRowster && !regFReader && !regCliSilentProxy && !regFWriter && !regContractGenerator && !regCodeNavigator && !regNotifier && !regGemini && !regOpenCode && !regCursor && !regWindsurf && !regZed)
+    if (!uninstall && !regRowster && !regFReader && !regCliSilentProxy && !regNotifier && !regGemini && !regOpenCode && !regCursor && !regWindsurf && !regZed)
     {
-        Log.Information("Usage: McpRegistrar [--register-rowster --rowster-path <path>] [--register-freader --freader-path <path>] [--register-clisilentproxy --clisilentproxy-path <path>] [--register-fwriter --fwriter-path <path>] [--register-contractgenerator --contractgenerator-path <path>] [--register-codenavigator --codenavigator-path <path>] [--register-notifier --notifier-path <path>] [--skip-claude] [--register-gemini] [--register-opencode] [--register-cursor] [--register-windsurf] [--register-zed]");
+        Log.Information("Usage: McpRegistrar [--register-rowster --rowster-path <path>] [--register-freader --freader-path <path>] [--register-clisilentproxy --clisilentproxy-path <path>] [--register-notifier --notifier-path <path>] [--skip-claude] [--register-gemini] [--register-opencode] [--register-cursor] [--register-windsurf] [--register-zed]");
         Log.Information("       McpRegistrar --uninstall");
         return;
     }
@@ -153,18 +141,12 @@ static void Run(string[] args)
                 var removedRowster           = ms.Remove("Rowster");
                 var removedFReader           = ms.Remove("FReader");
                 var removedCliSilentProxy    = ms.Remove("CliSilentProxy");
-                var removedFWriter           = ms.Remove("FWriter");
-                var removedContractGenerator = ms.Remove("ContractGenerator");
-                var removedCodeNavigator     = ms.Remove("CodeNavigator");
                 var removedNotifier          = ms.Remove("Notifier");
                 if (removedRowster)           { modified = true; Log.Information("[{Label}] Removed Rowster", label); }
                 if (removedFReader)           { modified = true; Log.Information("[{Label}] Removed FReader", label); }
                 if (removedCliSilentProxy)    { modified = true; Log.Information("[{Label}] Removed CliSilentProxy", label); }
-                if (removedFWriter)           { modified = true; Log.Information("[{Label}] Removed FWriter", label); }
-                if (removedContractGenerator) { modified = true; Log.Information("[{Label}] Removed ContractGenerator", label); }
-                if (removedCodeNavigator)     { modified = true; Log.Information("[{Label}] Removed CodeNavigator", label); }
                 if (removedNotifier)          { modified = true; Log.Information("[{Label}] Removed Notifier", label); }
-                if (!removedRowster && !removedFReader && !removedCliSilentProxy && !removedFWriter && !removedContractGenerator && !removedCodeNavigator && !removedNotifier)
+                if (!removedRowster && !removedFReader && !removedCliSilentProxy && !removedNotifier)
                     Log.Information("[{Label}] No MCP server entries found", label);
 
                 if (ms.Count == 0)
@@ -221,42 +203,6 @@ static void Run(string[] args)
                 };
                 modified = true;
                 Log.Information("[{Label}] Registered CliSilentProxy: {Path}", label, cliSilentProxyPath);
-            }
-
-            if (regFWriter && fwriterPath != null)
-            {
-                ms["FWriter"] = new JsonObject
-                {
-                    ["command"] = fwriterPath,
-                    ["args"] = new JsonArray("--mcp"),
-                    ["_description"] = "Validated code editor -- AST-level function body editing with backup/rollback, syntax validation, and file creation for C#."
-                };
-                modified = true;
-                Log.Information("[{Label}] Registered FWriter: {Path}", label, fwriterPath);
-            }
-
-            if (regContractGenerator && contractGeneratorPath != null)
-            {
-                ms["ContractGenerator"] = new JsonObject
-                {
-                    ["command"] = contractGeneratorPath,
-                    ["args"] = new JsonArray("--mcp"),
-                    ["_description"] = "C# to TypeScript interface generator -- converts C# data types to TS using Roslyn."
-                };
-                modified = true;
-                Log.Information("[{Label}] Registered ContractGenerator: {Path}", label, contractGeneratorPath);
-            }
-
-            if (regCodeNavigator && codeNavigatorPath != null)
-            {
-                ms["CodeNavigator"] = new JsonObject
-                {
-                    ["command"] = codeNavigatorPath,
-                    ["args"] = new JsonArray("--mcp"),
-                    ["_description"] = "Semantic code navigation -- symbols, definition, references, hover, call graph for C# and TS."
-                };
-                modified = true;
-                Log.Information("[{Label}] Registered CodeNavigator: {Path}", label, codeNavigatorPath);
             }
 
             if (regNotifier && notifierPath != null)
@@ -385,18 +331,12 @@ static void Run(string[] args)
                 var removedRowster           = ms.Remove("Rowster");
                 var removedFReader           = ms.Remove("FReader");
                 var removedCliSilentProxy    = ms.Remove("CliSilentProxy");
-                var removedFWriter           = ms.Remove("FWriter");
-                var removedContractGenerator = ms.Remove("ContractGenerator");
-                var removedCodeNavigator     = ms.Remove("CodeNavigator");
                 var removedNotifier2          = ms.Remove("Notifier");
                 if (removedRowster)           { modified = true; Log.Information("[{Label}] Removed Rowster", label); }
                 if (removedFReader)           { modified = true; Log.Information("[{Label}] Removed FReader", label); }
                 if (removedCliSilentProxy)    { modified = true; Log.Information("[{Label}] Removed CliSilentProxy", label); }
-                if (removedFWriter)           { modified = true; Log.Information("[{Label}] Removed FWriter", label); }
-                if (removedContractGenerator) { modified = true; Log.Information("[{Label}] Removed ContractGenerator", label); }
-                if (removedCodeNavigator)     { modified = true; Log.Information("[{Label}] Removed CodeNavigator", label); }
                 if (removedNotifier2)          { modified = true; Log.Information("[{Label}] Removed Notifier", label); }
-                if (!removedRowster && !removedFReader && !removedCliSilentProxy && !removedFWriter && !removedContractGenerator && !removedCodeNavigator && !removedNotifier2)
+                if (!removedRowster && !removedFReader && !removedCliSilentProxy && !removedNotifier2)
                     Log.Information("[{Label}] No MCP server entries found", label);
                 if (ms.Count == 0) { root.Remove("mcp"); modified = true; Log.Information("[{Label}] mcp is empty — removed key", label); }
             }
@@ -447,42 +387,6 @@ static void Run(string[] args)
                 };
                 modified = true;
                 Log.Information("[{Label}] Registered CliSilentProxy", label);
-            }
-
-            if (regFWriter && fwriterPath != null)
-            {
-                ms["FWriter"] = new JsonObject
-                {
-                    ["type"] = "local",
-                    ["command"] = new JsonArray(fwriterPath, "--mcp"),
-                    ["enabled"] = true
-                };
-                modified = true;
-                Log.Information("[{Label}] Registered FWriter", label);
-            }
-
-            if (regContractGenerator && contractGeneratorPath != null)
-            {
-                ms["ContractGenerator"] = new JsonObject
-                {
-                    ["type"] = "local",
-                    ["command"] = new JsonArray(contractGeneratorPath, "--mcp"),
-                    ["enabled"] = true
-                };
-                modified = true;
-                Log.Information("[{Label}] Registered ContractGenerator", label);
-            }
-
-            if (regCodeNavigator && codeNavigatorPath != null)
-            {
-                ms["CodeNavigator"] = new JsonObject
-                {
-                    ["type"] = "local",
-                    ["command"] = new JsonArray(codeNavigatorPath, "--mcp"),
-                    ["enabled"] = true
-                };
-                modified = true;
-                Log.Information("[{Label}] Registered CodeNavigator", label);
             }
 
             if (regNotifier && notifierPath != null)
@@ -620,18 +524,12 @@ static void Run(string[] args)
             var removedRowster           = cs.Remove("Rowster");
             var removedFReader           = cs.Remove("FReader");
             var removedCliSilentProxy    = cs.Remove("CliSilentProxy");
-            var removedFWriter           = cs.Remove("FWriter");
-            var removedContractGenerator = cs.Remove("ContractGenerator");
-            var removedCodeNavigator     = cs.Remove("CodeNavigator");
             var removedNotifier3         = cs.Remove("Notifier");
             if (removedRowster)           { modified = true; Log.Information("[{Label}] Removed Rowster", label); }
             if (removedFReader)           { modified = true; Log.Information("[{Label}] Removed FReader", label); }
             if (removedCliSilentProxy)    { modified = true; Log.Information("[{Label}] Removed CliSilentProxy", label); }
-            if (removedFWriter)           { modified = true; Log.Information("[{Label}] Removed FWriter", label); }
-            if (removedContractGenerator) { modified = true; Log.Information("[{Label}] Removed ContractGenerator", label); }
-            if (removedCodeNavigator)     { modified = true; Log.Information("[{Label}] Removed CodeNavigator", label); }
             if (removedNotifier3)         { modified = true; Log.Information("[{Label}] Removed Notifier", label); }
-            if (!removedRowster && !removedFReader && !removedCliSilentProxy && !removedFWriter && !removedContractGenerator && !removedCodeNavigator && !removedNotifier3)
+            if (!removedRowster && !removedFReader && !removedCliSilentProxy && !removedNotifier3)
                 Log.Information("[{Label}] No MCP server entries found", label);
             if (cs.Count == 0) { root.Remove("context_servers"); modified = true; Log.Information("[{Label}] context_servers is empty — removed key", label); }
         }
@@ -688,48 +586,6 @@ static void Run(string[] args)
             };
             modified = true;
             Log.Information("[{Label}] Registered CliSilentProxy", label);
-        }
-
-        if (regFWriter && fwriterPath != null)
-        {
-            cs["FWriter"] = new JsonObject
-            {
-                ["command"] = new JsonObject
-                {
-                    ["path"] = fwriterPath,
-                    ["args"] = new JsonArray("--mcp")
-                }
-            };
-            modified = true;
-            Log.Information("[{Label}] Registered FWriter", label);
-        }
-
-        if (regContractGenerator && contractGeneratorPath != null)
-        {
-            cs["ContractGenerator"] = new JsonObject
-            {
-                ["command"] = new JsonObject
-                {
-                    ["path"] = contractGeneratorPath,
-                    ["args"] = new JsonArray("--mcp")
-                }
-            };
-            modified = true;
-            Log.Information("[{Label}] Registered ContractGenerator", label);
-        }
-
-        if (regCodeNavigator && codeNavigatorPath != null)
-        {
-            cs["CodeNavigator"] = new JsonObject
-            {
-                ["command"] = new JsonObject
-                {
-                    ["path"] = codeNavigatorPath,
-                    ["args"] = new JsonArray("--mcp")
-                }
-            };
-            modified = true;
-            Log.Information("[{Label}] Registered CodeNavigator", label);
         }
 
         if (regNotifier && notifierPath != null)

@@ -14,8 +14,8 @@ public class LineEngineTests
         var result = LineEngine.ReadLines(temp, null, null, null);
         Assert.NotNull(result.Data);
         Assert.Null(result.Error);
-        var r = result.Data!["_r"] as string[];
-        Assert.Empty(r!);
+        var h = result.Data!["_h"] as string[];
+        Assert.Empty(h!);
         File.Delete(temp);
     }
 
@@ -50,9 +50,9 @@ public class LineEngineTests
     {
         var result = LineEngine.ReadLines(FixturePath, 1, 5, null);
         Assert.NotNull(result.Data);
-        var r = result.Data!["_r"] as string[];
-        Assert.Equal(5, r!.Length);
-        Assert.StartsWith("1\t", r[0]);
+        var h = result.Data!["_h"] as string[];
+        Assert.Equal(5, h!.Length);
+        Assert.StartsWith("1\t", h[0]);
     }
 
     [Fact]
@@ -60,8 +60,8 @@ public class LineEngineTests
     {
         var result = LineEngine.ReadLines(FixturePath, 1, 100, 3);
         Assert.NotNull(result.Data);
-        var r = result.Data!["_r"] as string[];
-        Assert.True(r!.Length <= 3);
+        var h = result.Data!["_h"] as string[];
+        Assert.True(h!.Length <= 3);
         Assert.True((bool)result.Data!["_truncated"]!);
     }
 
@@ -70,8 +70,8 @@ public class LineEngineTests
     {
         var result = LineEngine.ReadLines(FixturePath, 1, 10, 0);
         Assert.NotNull(result.Data);
-        var r = result.Data!["_r"] as string[];
-        Assert.Equal(10, r!.Length);
+        var h = result.Data!["_h"] as string[];
+        Assert.Equal(10, h!.Length);
     }
 
     [Fact]
@@ -79,9 +79,9 @@ public class LineEngineTests
     {
         var result = LineEngine.ReadLines(FixturePath, 1, 1, null);
         Assert.NotNull(result.Data);
-        var r = result.Data!["_r"] as string[];
-        Assert.Contains('\t', r![0]);
-        var parts = r[0].Split('\t', 2);
+        var h = result.Data!["_h"] as string[];
+        Assert.Contains('\t', h![0]);
+        var parts = h[0].Split('\t', 2);
         Assert.Equal("1", parts[0]);
         Assert.NotEmpty(parts[1]);
     }
@@ -145,8 +145,8 @@ public class LineEngineTests
     {
         var result = LineEngine.ReadLines(FixturePath, 1, 5, null, stripImports: true);
         Assert.NotNull(result.Data);
-        var r = result.Data!["_r"] as string[];
-        Assert.All(r!, line => Assert.DoesNotContain("using ", line));
+        var h = result.Data!["_h"] as string[];
+        Assert.All(h!, line => Assert.DoesNotContain("using ", line));
     }
 
     [Fact]
@@ -154,8 +154,8 @@ public class LineEngineTests
     {
         var result = LineEngine.ReadLines(FixturePath, 14, 16, null, normalizeIndent: true);
         Assert.NotNull(result.Data);
-        var r = result.Data!["_r"] as string[];
-        var contents = r!.Select(line => line.Split('\t', 2)[1]).ToArray();
+        var h = result.Data!["_h"] as string[];
+        var contents = h!.Select(line => line.Split('\t', 2)[1]).ToArray();
         Assert.Equal("public SampleClass(int value, string name)", contents[0]);
         Assert.Equal("{", contents[1]);
         Assert.Equal("    _value = value;", contents[2]);

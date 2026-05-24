@@ -117,7 +117,8 @@ public class McpIntegrationTests : IDisposable
         var text = CallTool("read", new { path = FixturePath, timeoutMs = 30000 });
         var data = JsonSerializer.Deserialize<JsonElement>(text);
         Assert.True(data.TryGetProperty("_r", out _));
-        Assert.True(data.TryGetProperty("_h", out _));
+        Assert.True(data.TryGetProperty("_h", out var h));
+        Assert.Equal(2, h.GetArrayLength()); // ["line", "text"]
     }
 
     [Fact]

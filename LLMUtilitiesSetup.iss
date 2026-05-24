@@ -1,5 +1,5 @@
 #define MyAppName      "LLM Utilities"
-#define MyAppVersion   "1.31.0"
+#define MyAppVersion   "1.32.0"
 #define MyAppPublisher "Savanna HerdIQ"
 #define PublishDir     "publish"
 #define ReadmeFile     "README.md"
@@ -49,9 +49,6 @@ var
   ChkRowster: TNewCheckBox;
   ChkFReader: TNewCheckBox;
   ChkCliSilentProxy: TNewCheckBox;
-  ChkFWriter: TNewCheckBox;
-  ChkContractGenerator: TNewCheckBox;
-  ChkCodeNavigator: TNewCheckBox;
   ChkNotifier: TNewCheckBox;
   ChkLlmSelectAll: TNewCheckBox;
   ChkClaudeCode: TNewCheckBox;
@@ -158,9 +155,6 @@ begin
   ChkRowster.Checked := ChkSelectAll.Checked;
   ChkFReader.Checked := ChkSelectAll.Checked;
   ChkCliSilentProxy.Checked := ChkSelectAll.Checked;
-  ChkFWriter.Checked := ChkSelectAll.Checked;
-  ChkContractGenerator.Checked := ChkSelectAll.Checked;
-  ChkCodeNavigator.Checked := ChkSelectAll.Checked;
   ChkNotifier.Checked := ChkSelectAll.Checked;
 end;
 
@@ -219,37 +213,10 @@ begin
   ChkCliSilentProxy.Caption := 'Register CliSilentProxy (shell command proxy)';
   ChkCliSilentProxy.Checked := True;
 
-  ChkFWriter := TNewCheckBox.Create(McpPage);
-  ChkFWriter.Parent := McpPage.Surface;
-  ChkFWriter.Left := 22;
-  ChkFWriter.Top := ChkCliSilentProxy.Top + ChkCliSilentProxy.Height + 8;
-  ChkFWriter.Width := McpPage.SurfaceWidth - 30;
-  ChkFWriter.Height := 17;
-  ChkFWriter.Caption := 'Register FWriter (validated code editor)';
-  ChkFWriter.Checked := True;
-
-  ChkContractGenerator := TNewCheckBox.Create(McpPage);
-  ChkContractGenerator.Parent := McpPage.Surface;
-  ChkContractGenerator.Left := 22;
-  ChkContractGenerator.Top := ChkFWriter.Top + ChkFWriter.Height + 8;
-  ChkContractGenerator.Width := McpPage.SurfaceWidth - 30;
-  ChkContractGenerator.Height := 17;
-  ChkContractGenerator.Caption := 'Register ContractGenerator (C# to TypeScript interface generator)';
-  ChkContractGenerator.Checked := True;
-
-  ChkCodeNavigator := TNewCheckBox.Create(McpPage);
-  ChkCodeNavigator.Parent := McpPage.Surface;
-  ChkCodeNavigator.Left := 22;
-  ChkCodeNavigator.Top := ChkContractGenerator.Top + ChkContractGenerator.Height + 8;
-  ChkCodeNavigator.Width := McpPage.SurfaceWidth - 30;
-  ChkCodeNavigator.Height := 17;
-  ChkCodeNavigator.Caption := 'Register CodeNavigator (semantic code navigation for C# and TS)';
-  ChkCodeNavigator.Checked := True;
-
   ChkNotifier := TNewCheckBox.Create(McpPage);
   ChkNotifier.Parent := McpPage.Surface;
   ChkNotifier.Left := 22;
-  ChkNotifier.Top := ChkCodeNavigator.Top + ChkCodeNavigator.Height + 8;
+  ChkNotifier.Top := ChkCliSilentProxy.Top + ChkCliSilentProxy.Height + 8;
   ChkNotifier.Width := McpPage.SurfaceWidth - 30;
   ChkNotifier.Height := 17;
   ChkNotifier.Caption := 'Register Notifier (desktop notification service)';
@@ -360,9 +327,6 @@ begin
     SummaryLines.Lines.Add('✓ Rowster.exe installed');
     SummaryLines.Lines.Add('✓ FReader.exe installed');
     SummaryLines.Lines.Add('✓ CliSilentProxy.exe installed');
-    SummaryLines.Lines.Add('✓ FWriter.exe installed');
-    SummaryLines.Lines.Add('✓ ContractGenerator.exe installed');
-    SummaryLines.Lines.Add('✓ CodeNavigator.exe installed');
     SummaryLines.Lines.Add('✓ Notifier.exe installed');
     SummaryLines.Lines.Add('✓ NotifierHelper.exe installed');
     SummaryLines.Lines.Add('✓ McpRegistrar.exe installed');
@@ -370,7 +334,7 @@ begin
     SummaryLines.Lines.Add('✓ LLMUtilities added to system PATH');
 
     // ── MCP registration (Claude Code + optionally Gemini CLI) ─────────────────
-    if (not ChkRowster.Checked) and (not ChkFReader.Checked) and (not ChkCliSilentProxy.Checked) and (not ChkFWriter.Checked) and (not ChkContractGenerator.Checked) and (not ChkCodeNavigator.Checked) and (not ChkNotifier.Checked) then
+    if (not ChkRowster.Checked) and (not ChkFReader.Checked) and (not ChkCliSilentProxy.Checked) and (not ChkNotifier.Checked) then
     begin
       SummaryLines.Lines.Add('');
       SummaryLines.Lines.Add('○ MCP registration skipped');
@@ -385,12 +349,6 @@ begin
         Args := Args + ' --register-freader --freader-path "' + ExpandConstant('{app}\FReader.exe') + '"';
       if ChkCliSilentProxy.Checked then
         Args := Args + ' --register-clisilentproxy --clisilentproxy-path "' + ExpandConstant('{app}\CliSilentProxy.exe') + '"';
-      if ChkFWriter.Checked then
-        Args := Args + ' --register-fwriter --fwriter-path "' + ExpandConstant('{app}\FWriter.exe') + '"';
-      if ChkContractGenerator.Checked then
-        Args := Args + ' --register-contractgenerator --contractgenerator-path "' + ExpandConstant('{app}\ContractGenerator.exe') + '"';
-      if ChkCodeNavigator.Checked then
-        Args := Args + ' --register-codenavigator --codenavigator-path "' + ExpandConstant('{app}\CodeNavigator.exe') + '"';
       if ChkNotifier.Checked then
         Args := Args + ' --register-notifier --notifier-path "' + ExpandConstant('{app}\Notifier.exe') + '"';
       if not ChkClaudeCode.Checked then
@@ -411,19 +369,13 @@ begin
       begin
         SummaryLines.Lines.Add('');
         if ChkRowster.Checked then
-          SummaryLines.Lines.Add('✓ Rowster registered with Claude Code');
+          SummaryLines.Lines.Add('✓ Rowster registered with LLMs');
         if ChkFReader.Checked then
-          SummaryLines.Lines.Add('✓ FReader registered with Claude Code');
+          SummaryLines.Lines.Add('✓ FReader registered with LLMs');
         if ChkCliSilentProxy.Checked then
-          SummaryLines.Lines.Add('✓ CliSilentProxy registered with Claude Code');
-        if ChkFWriter.Checked then
-          SummaryLines.Lines.Add('✓ FWriter registered with Claude Code');
-        if ChkContractGenerator.Checked then
-          SummaryLines.Lines.Add('✓ ContractGenerator registered with Claude Code');
-        if ChkCodeNavigator.Checked then
-          SummaryLines.Lines.Add('✓ CodeNavigator registered with Claude Code');
+          SummaryLines.Lines.Add('✓ CliSilentProxy registered with LLMs');
         if ChkNotifier.Checked then
-          SummaryLines.Lines.Add('✓ Notifier registered with Claude Code');
+          SummaryLines.Lines.Add('✓ Notifier registered with LLMs');
         SummaryLines.Lines.Add('');
         SummaryLines.Lines.Add('  Also registered:');
         if ChkGemini.Checked then

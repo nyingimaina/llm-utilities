@@ -148,6 +148,16 @@ sealed class CliSilentProxyServer : McpServerBase
     protected override string? GetHarnessInstructions() => null;
     protected override int? AutoNotifyThresholdMs => 5000;
 
+    protected override string GetNotificationContext(string toolName, JsonElement? arguments)
+    {
+        if (toolName == "run")
+        {
+            var cmd = GetString(arguments, "command");
+            if (cmd is not null) return cmd;
+        }
+        return toolName;
+    }
+
     protected override object GetInstructions()
     {
         var instr = new List<string>
@@ -218,9 +228,15 @@ sealed class CliSilentProxyServer : McpServerBase
             "_s  = status   _exit = exit code  _ms = duration",
             "_cmd = command  _id = run ID  _tail = log lines  _parsed = structured output",
     };
-    instr.AddRange(GetResiliencySection());
+        instr.Add("=== TIMEOUT ===");
+        instr.Add("timeoutMs required (notify if >5000ms).");
+        instr.Add("");
+        instr.Add("=== NOTIFICATION ===");
+        instr.Add("Commands >5s auto-notify with the command name in the title.");
+        instr.Add("For better messages, pass _meta:{canNotify:true} in params and call");
+        instr.Add("Notifier.notify() yourself with a human-friendly description of what");
+        instr.Add("was done (e.g. 'dotnet build succeeded (12s)' not 'CliSilentProxy: 8.2s').");
     instr.Add("");
-    instr.AddRange(GetSelfImprovementSection());
     return new { _h = instr.ToArray() };
     }
 }

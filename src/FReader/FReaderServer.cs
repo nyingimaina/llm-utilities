@@ -464,18 +464,19 @@ COMPACT FIELDS: _r=rows _h=headers _line_start/_line_end=range _sig=signature _t
             if (readResult.Error is not null)
                 throw new McpErrorException(JsonSerializer.Serialize(readResult.Error));
 
+            var sourceLines = ExtractLines(readResult.Data!);
             var result = new Dictionary<string, object?>
             {
                 ["_name"] = f.Name,
                 ["_sig"] = f.Signature,
                 ["_line_start"] = f.LineStart,
                 ["_line_end"] = f.LineEnd,
-                ["_r"] = readResult.Data!["_r"]
+                ["_r"] = sourceLines
             };
 
-            if (useAliases && readResult.Data!["_r"] is string[] lines)
+            if (useAliases)
             {
-                var (aliases, aliasedLines, warning) = TypeAliaser.Apply(lines);
+                var (aliases, aliasedLines, warning) = TypeAliaser.Apply(sourceLines);
                 if (aliases is not null)
                 {
                     result["_r"] = aliasedLines;
@@ -491,18 +492,19 @@ COMPACT FIELDS: _r=rows _h=headers _line_start/_line_end=range _sig=signature _t
         foreach (var f in targetFuncs)
         {
             var readResult = LineEngine.ReadLines(path, f.LineStart, f.LineEnd, truncate: 0, stripImports, normalizeIndentFn);
+            var sourceLines = readResult.Data is not null ? ExtractLines(readResult.Data) : Array.Empty<string>();
             var matchData = new Dictionary<string, object?>
             {
                 ["_name"] = f.Name,
                 ["_sig"] = f.Signature,
                 ["_line_start"] = f.LineStart,
                 ["_line_end"] = f.LineEnd,
-                ["_r"] = readResult.Data?["_r"]
+                ["_r"] = sourceLines
             };
 
-            if (useAliases && readResult.Data?["_r"] is string[] mLines)
+            if (useAliases)
             {
-                var (aliases, aliasedLines, warning) = TypeAliaser.Apply(mLines);
+                var (aliases, aliasedLines, warning) = TypeAliaser.Apply(sourceLines);
                 if (aliases is not null)
                 {
                     matchData["_r"] = aliasedLines;
@@ -589,8 +591,7 @@ COMPACT FIELDS: _r=rows _h=headers _line_start/_line_end=range _sig=signature _t
             var readResult = LineEngine.ReadLines(path, start, end, truncate: 0, stripImports, normalizeIndentFn);
             if (readResult.Error is not null) continue;
 
-            var rData = readResult.Data!;
-            var lines = rData["_r"] as string[] ?? Array.Empty<string>();
+            var lines = readResult.Data is not null ? ExtractLines(readResult.Data) : Array.Empty<string>();
 
             var serialized = JsonSerializer.Serialize(new { _r = lines });
             if (totalChars + serialized.Length > maxChars)
@@ -682,6 +683,15 @@ COMPACT FIELDS: _r=rows _h=headers _line_start/_line_end=range _sig=signature _t
         if (result is Dictionary<string, object?> grepErr && grepErr.ContainsKey("error"))
             throw new McpErrorException(JsonSerializer.Serialize(result));
         return result;
+    }
+
+    static string[] ExtractLines(Dictionary<string, object?> data)
+    {
+        if (data.TryGetValue("_r", out var r) && r is string[] rLines)
+            return rLines;
+        if (data.TryGetValue("_h", out var h) && h is string[] hLines)
+            return hLines;
+        return [];
     }
 
     object HandleSearchFunction(JsonElement? arguments)
@@ -844,9 +854,9 @@ COMPACT FIELDS: _r=rows _h=headers _line_start/_line_end=range _sig=signature _t
             "12. timeoutMs defaults: 30000 for most tools, 60000 for grep/search_function. Omit unless you need longer.",
             "",
         };
-        instr.AddRange(GetResiliencySection());
+        instr.Add("=== TIMEOUT ===");
+        instr.Add("timeoutMs defaults to 30000 (read/search) / 60000 (grep).");
         instr.Add("");
-        instr.AddRange(GetSelfImprovementSection());
         instr.Add("=== SPECIALIZED PROVIDERS (language-aware extraction) ===");
         instr.Add("The following file types have dedicated language providers for AST-level extraction:");
         instr.Add("");

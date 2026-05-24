@@ -212,9 +212,7 @@ sealed class McpServer : McpServerBase
             "_implementations = [{ kind, name, file, line }]",
             "error/error_code = structured errors (no _ prefix)",
         };
-        instr.AddRange(GetResiliencySection());
         instr.Add("");
-        instr.AddRange(GetSelfImprovementSection());
         return new { _h = instr.ToArray() };
     }
 }

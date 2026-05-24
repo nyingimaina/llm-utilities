@@ -9,7 +9,7 @@ Write-Host "==> Cleaning publish dir..."
 if (Test-Path $publish) { Remove-Item "$publish\*" -Recurse -Force }
 else { New-Item -ItemType Directory -Path $publish | Out-Null }
 
-$projects   = @("Rowster", "FReader", "CliSilentProxy", "FWriter", "ContractGenerator", "CodeNavigator", "Notifier", "McpRegistrar", "NotifierHelper")
+$projects   = @("Rowster", "FReader", "CliSilentProxy", "Notifier", "McpRegistrar", "NotifierHelper")
 $ridProjects = @{}
 
 foreach ($proj in $projects) {
@@ -18,15 +18,6 @@ foreach ($proj in $projects) {
         -o "$publish" `
         --nologo -v quiet
     if ($LASTEXITCODE -ne 0) { throw "Publish failed for $proj" }
-}
-
-foreach ($pair in $ridProjects.GetEnumerator()) {
-    Write-Host "==> Publishing $($pair.Key) ($($pair.Value))..."
-    dotnet publish "$root\src\$($pair.Key)" -c Release `
-        -o "$publish" `
-        -r $pair.Value `
-        --nologo -v quiet
-    if ($LASTEXITCODE -ne 0) { throw "Publish failed for $($pair.Key)" }
 }
 
 Write-Host "==> Published exes:"

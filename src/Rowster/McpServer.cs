@@ -198,9 +198,9 @@ sealed class McpServer : McpServerBase, IDisposable
             "5. If you forget the mapping, call get_instructions again",
             "",
         };
-        instr.AddRange(GetResiliencySection());
+        instr.Add("=== TIMEOUT ===");
+        instr.Add("timeoutMs defaults to 60000.");
         instr.Add("");
-        instr.AddRange(GetSelfImprovementSection());
         return new { _h = instr.ToArray() };
     }
 
