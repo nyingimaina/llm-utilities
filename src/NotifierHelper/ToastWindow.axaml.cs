@@ -63,6 +63,16 @@ public partial class ToastWindow : Window
     bool _closing;
     IDisposable? _pollTimer;
 
+    // ── Sound: winmm.dll on Windows ───────────────────────────────────────────
+
+    [DllImport("winmm.dll", SetLastError = true)]
+    static extern bool PlaySound(byte[] pszSound, IntPtr hmod, uint fdwSound);
+
+    const uint SND_MEMORY = 0x00000004;
+    const uint SND_SYNC = 0x00000000;
+
+    // ── Constructor ───────────────────────────────────────────────────────────
+
     public ToastWindow(string title, string message, string type, bool playSound, int dismissMs,
         string? sender = null, string? task = null)
     {
@@ -107,19 +117,13 @@ public partial class ToastWindow : Window
         try
         {
             if (OperatingSystem.IsWindows())
-            {
                 WindowActivator.ActivateByTitle(_sender);
-            }
             else if (OperatingSystem.IsMacOS())
-            {
                 Process.Start("osascript", $"-e \"tell app \"{_sender}\" to activate\"");
-            }
             else if (OperatingSystem.IsLinux())
-            {
                 Process.Start("wmctrl", $"-a \"{_sender}\"");
-            }
         }
-        catch { /* best-effort */ }
+        catch { }
     }
 
     void ConfigureForType()
@@ -128,13 +132,13 @@ public partial class ToastWindow : Window
         {
             AccentStrip.Background = new SolidColorBrush(Color.Parse("#FF5252"));
             IconText.Foreground = new SolidColorBrush(Color.Parse("#FF5252"));
-            IconText.Text = "✕";
+            IconText.Text = "\u2715";
         }
         else
         {
             AccentStrip.Background = new SolidColorBrush(Color.Parse("#4A9EFF"));
             IconText.Foreground = new SolidColorBrush(Color.Parse("#4CAF50"));
-            IconText.Text = "✓";
+            IconText.Text = "\u2713";
         }
     }
 
@@ -158,17 +162,28 @@ public partial class ToastWindow : Window
         try
         {
             Directory.CreateDirectory(StateDir);
-            File.WriteAllText(StatePath, JsonSerializer.Serialize(entries));
+            var tmp = StatePath + ".tmp";
+            File.WriteAllText(tmp, JsonSerializer.Serialize(entries));
+            File.Move(tmp, StatePath, overwrite: true);
         }
         catch { }
     }
 
+    static bool IsProcessAlive(int pid)
+    {
+        try { using var p = Process.GetProcessById(pid); return !p.HasExited; }
+        catch { return false; }
+    }
+
     int ClaimSlot()
     {
-        StateMutex.WaitOne();
+        try { StateMutex.WaitOne(); }
+        catch (AbandonedMutexException) { }
+
         try
         {
             var entries = ReadState();
+            entries.RemoveAll(e => !IsProcessAlive(e.Pid));
             var taken = entries.Select(e => e.Slot).ToHashSet();
             int slot = 0;
             while (taken.Contains(slot)) slot++;
@@ -182,12 +197,13 @@ public partial class ToastWindow : Window
 
     void ReleaseSlot()
     {
-        StateMutex.WaitOne();
+        try { StateMutex.WaitOne(); }
+        catch (AbandonedMutexException) { }
+
         try
         {
             var entries = ReadState();
             entries.RemoveAll(e => e.Id == _myId);
-            // Compact slots: re-number so no gaps
             var sorted = entries.OrderBy(e => e.Slot).ToList();
             for (int i = 0; i < sorted.Count; i++)
                 sorted[i] = sorted[i] with { Slot = i };
@@ -217,7 +233,7 @@ public partial class ToastWindow : Window
         var bounds = screen.Bounds;
         var x = (int)((bounds.X + bounds.Width) / scaling - Width - 16);
         var slot = _mySlot;
-        var y = (int)((bounds.Y + bounds.Height) / scaling - BottomMargin - (_myHeight + Gap) * (slot + 1));
+        var y = (int)((bounds.Y + bounds.Height) / scaling - BottomMargin - _myHeight - (_myHeight + Gap) * slot);
 
         var target = new PixelPoint((int)(x * scaling), (int)(y * scaling));
 
@@ -248,7 +264,6 @@ public partial class ToastWindow : Window
 
     async void OnOpened(object? sender, EventArgs e)
     {
-        // Measure actual height after layout
         _myHeight = ClientSize.Height;
         _mySlot = ClaimSlot();
         Reposition(animate: false);
@@ -313,13 +328,13 @@ public partial class ToastWindow : Window
     {
         var startX = Position.X;
         var startY = Position.Y;
-        var sw = System.Diagnostics.Stopwatch.StartNew();
+        var sw = Stopwatch.StartNew();
         var duration = 300;
 
         while (sw.ElapsedMilliseconds < duration)
         {
             var t = sw.ElapsedMilliseconds / (double)duration;
-            t = 1 - Math.Pow(1 - t, 3); // ease-out
+            t = 1 - Math.Pow(1 - t, 3);
             var x = (int)(startX + (target.X - startX) * t);
             var y = (int)(startY + (target.Y - startY) * t);
             Position = new PixelPoint(x, y);
@@ -334,7 +349,7 @@ public partial class ToastWindow : Window
 
         var transform = this.RenderTransform as TranslateTransform;
         var startY = transform?.Y ?? 0;
-        var sw = System.Diagnostics.Stopwatch.StartNew();
+        var sw = Stopwatch.StartNew();
         var duration = 400;
 
         while (sw.ElapsedMilliseconds < duration)
@@ -353,7 +368,7 @@ public partial class ToastWindow : Window
 
     static async Task AnimateProperty(Action<double> setter, double from, double to, int durationMs)
     {
-        var sw = System.Diagnostics.Stopwatch.StartNew();
+        var sw = Stopwatch.StartNew();
         while (sw.ElapsedMilliseconds < durationMs)
         {
             var t = sw.ElapsedMilliseconds / (double)durationMs;
@@ -370,8 +385,59 @@ public partial class ToastWindow : Window
 
     void PlaySound()
     {
+        if (!_playSound) return;
         var samples = _type == "error" ? GenerateErrorSound() : GenerateInfoSound();
-        PlayWavAsync(samples);
+        var wav = BuildWav(samples);
+
+        if (OperatingSystem.IsWindows())
+        {
+            _ = Task.Run(() =>
+            {
+                try { PlaySound(wav, IntPtr.Zero, SND_MEMORY | SND_SYNC); }
+                catch { }
+            });
+        }
+        else
+        {
+            PlayViaFile(wav);
+        }
+    }
+
+    void PlayViaFile(byte[] wav)
+    {
+        var tempPath = Path.Combine(Path.GetTempPath(), $"notifier_{Guid.NewGuid():N}.wav");
+        try
+        {
+            File.WriteAllBytes(tempPath, wav);
+            if (OperatingSystem.IsMacOS())
+            {
+                var psi = new ProcessStartInfo
+                {
+                    FileName = "afplay",
+                    Arguments = $"\"{tempPath}\"",
+                    UseShellExecute = false,
+                    CreateNoWindow = true,
+                };
+                using var proc = Process.Start(psi);
+                proc?.WaitForExit(2000);
+            }
+            else if (OperatingSystem.IsLinux())
+            {
+                var psi = new ProcessStartInfo
+                {
+                    FileName = "aplay",
+                    Arguments = $"\"{tempPath}\"",
+                    UseShellExecute = false,
+                    CreateNoWindow = true,
+                };
+                using var proc = Process.Start(psi);
+                proc?.WaitForExit(2000);
+            }
+        }
+        finally
+        {
+            try { File.Delete(tempPath); } catch { }
+        }
     }
 
     static short[] GenerateInfoSound()
@@ -405,70 +471,14 @@ public partial class ToastWindow : Window
         return result;
     }
 
-    async void PlayWavAsync(short[] samples)
+    static byte[] BuildWav(short[] samples)
     {
-        try
-        {
-            var sampleRate = 44100;
-            var bitsPerSample = 16;
-            var channels = 1;
-            var dataSize = samples.Length * 2;
-            var wav = new byte[44 + dataSize];
+        var sampleRate = 44100;
+        var bitsPerSample = 16;
+        var channels = 1;
+        var dataSize = samples.Length * 2;
+        var wav = new byte[44 + dataSize];
 
-            WriteWavHeader(wav, sampleRate, bitsPerSample, channels, dataSize);
-            Buffer.BlockCopy(samples, 0, wav, 44, dataSize);
-
-            var tempPath = Path.Combine(Path.GetTempPath(), $"notifier_{Guid.NewGuid():N}.wav");
-            await File.WriteAllBytesAsync(tempPath, wav);
-
-            // Run process + WaitForExit on background thread to avoid blocking UI
-            await Task.Run(() =>
-            {
-                if (OperatingSystem.IsWindows())
-                {
-                    var psi = new System.Diagnostics.ProcessStartInfo
-                    {
-                        FileName = "powershell",
-                        Arguments = $"-NoProfile -ExecutionPolicy Bypass -Command \"(New-Object Media.SoundPlayer '{tempPath.Replace("'", "''")}').PlaySync()\"",
-                        UseShellExecute = false,
-                        CreateNoWindow = true,
-                    };
-                    using var proc = System.Diagnostics.Process.Start(psi);
-                    proc?.WaitForExit(3000);
-                }
-                else if (OperatingSystem.IsMacOS())
-                {
-                    var psi = new System.Diagnostics.ProcessStartInfo
-                    {
-                        FileName = "afplay",
-                        Arguments = $"\"{tempPath}\"",
-                        UseShellExecute = false,
-                        CreateNoWindow = true,
-                    };
-                    using var proc = System.Diagnostics.Process.Start(psi);
-                    proc?.WaitForExit(2000);
-                }
-                else if (OperatingSystem.IsLinux())
-                {
-                    var psi = new System.Diagnostics.ProcessStartInfo
-                    {
-                        FileName = "aplay",
-                        Arguments = $"\"{tempPath}\"",
-                        UseShellExecute = false,
-                        CreateNoWindow = true,
-                    };
-                    using var proc = System.Diagnostics.Process.Start(psi);
-                    proc?.WaitForExit(2000);
-                }
-            });
-
-            try { File.Delete(tempPath); } catch { }
-        }
-        catch { }
-    }
-
-    static void WriteWavHeader(byte[] wav, int sampleRate, int bitsPerSample, int channels, int dataSize)
-    {
         var fmt = bitsPerSample / 8;
         var byteRate = sampleRate * channels * fmt;
         var blockAlign = channels * fmt;
@@ -486,5 +496,8 @@ public partial class ToastWindow : Window
         BitConverter.GetBytes((short)bitsPerSample).CopyTo(wav, 34);
         wav[36] = (byte)'d'; wav[37] = (byte)'a'; wav[38] = (byte)'t'; wav[39] = (byte)'a';
         BitConverter.GetBytes(dataSize).CopyTo(wav, 40);
+
+        Buffer.BlockCopy(samples, 0, wav, 44, dataSize);
+        return wav;
     }
 }
