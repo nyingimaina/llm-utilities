@@ -40,6 +40,7 @@ public abstract class McpServerBase
     };
 
     protected virtual bool RequiresTimeoutMs(string toolName) => true;
+    protected virtual int? DefaultTimeoutMs(string toolName) => null;
 
     public void Run(TextReader input, TextWriter output)
     {
@@ -121,6 +122,8 @@ public abstract class McpServerBase
             if (RequiresTimeoutMs(name))
             {
                 var timeoutMs = GetInt(arguments, "timeoutMs");
+                if (timeoutMs is null or 0)
+                    timeoutMs = DefaultTimeoutMs(name);
                 if (timeoutMs is null or 0)
                 {
                     var err = JsonSerializer.Serialize(new
@@ -337,8 +340,9 @@ public abstract class McpServerBase
     protected virtual string[] GetResiliencySection() => new[]
     {
         "=== RESILIENCY (mandatory) ===",
-        "timeoutMs is REQUIRED on every tool call. If omitted, the tool immediately",
-        "returns TIMEOUT_REQUIRED error instructing you to set it.",
+        "timeoutMs is OPTIONAL on FReader, FWriter (defaults 30000) and Rowster",
+        "(default 60000). On other servers, timeoutMs is REQUIRED. If omitted and",
+        "no default exists, the tool returns TIMEOUT_REQUIRED error.",
         "",
         "The tool internally enforces timeoutMs via CancellationToken and returns a",
         "clean TIMEOUT error if exceeded -- guaranteeing it never hangs.",

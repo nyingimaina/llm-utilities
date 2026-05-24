@@ -42,8 +42,12 @@ static void Run(string[] args)
     var regFWriter = false;
     var regContractGenerator = false;
     var regCodeNavigator = false;
+    var regClaude = true;
     var regGemini = false;
     var regOpenCode = false;
+    var regCursor = false;
+    var regWindsurf = false;
+    var regZed = false;
     var uninstall = false;
     string? rowsterPath = null;
     string? freaderPath = null;
@@ -62,8 +66,12 @@ static void Run(string[] args)
             case "--register-contractgenerator": regContractGenerator = true; break;
             case "--register-codenavigator": regCodeNavigator = true; break;
 
+            case "--skip-claude": regClaude = false; break;
             case "--register-gemini": regGemini = true; break;
             case "--register-opencode": regOpenCode = true; break;
+            case "--register-cursor": regCursor = true; break;
+            case "--register-windsurf": regWindsurf = true; break;
+            case "--register-zed": regZed = true; break;
             case "--rowster-path"       when i + 1 < args.Length: rowsterPath       = args[++i]; break;
             case "--freader-path"       when i + 1 < args.Length: freaderPath       = args[++i]; break;
             case "--clisilentproxy-path" when i + 1 < args.Length: cliSilentProxyPath = args[++i]; break;
@@ -77,15 +85,15 @@ static void Run(string[] args)
         }
     }
 
-    if (uninstall && (regRowster || regFReader || regCliSilentProxy || regFWriter || regContractGenerator || regCodeNavigator || regGemini || regOpenCode))
+    if (uninstall && (regRowster || regFReader || regCliSilentProxy || regFWriter || regContractGenerator || regCodeNavigator || regGemini || regOpenCode || regCursor || regWindsurf || regZed))
     {
         Log.Error("Cannot combine --uninstall with --register-* flags");
         Environment.Exit(1);
     }
 
-    if (!uninstall && !regRowster && !regFReader && !regCliSilentProxy && !regFWriter && !regContractGenerator && !regCodeNavigator && !regGemini && !regOpenCode)
+    if (!uninstall && !regRowster && !regFReader && !regCliSilentProxy && !regFWriter && !regContractGenerator && !regCodeNavigator && !regGemini && !regOpenCode && !regCursor && !regWindsurf && !regZed)
     {
-        Log.Information("Usage: McpRegistrar [--register-rowster --rowster-path <path>] [--register-freader --freader-path <path>] [--register-clisilentproxy --clisilentproxy-path <path>] [--register-fwriter --fwriter-path <path>] [--register-contractgenerator --contractgenerator-path <path>] [--register-codenavigator --codenavigator-path <path>] [--register-gemini] [--register-opencode]");
+        Log.Information("Usage: McpRegistrar [--register-rowster --rowster-path <path>] [--register-freader --freader-path <path>] [--register-clisilentproxy --clisilentproxy-path <path>] [--register-fwriter --fwriter-path <path>] [--register-contractgenerator --contractgenerator-path <path>] [--register-codenavigator --codenavigator-path <path>] [--skip-claude] [--register-gemini] [--register-opencode] [--register-cursor] [--register-windsurf] [--register-zed]");
         Log.Information("       McpRegistrar --uninstall");
         return;
     }
@@ -304,7 +312,10 @@ static void Run(string[] args)
 
     // ── Apply to Claude Code config ──────────────────────────────────────
 
-    ModifyConfig(Path.Combine(configDir, ".claude.json"), "Claude Code");
+    if (regClaude)
+        ModifyConfig(Path.Combine(configDir, ".claude.json"), "Claude Code");
+    else
+        Log.Information("[Claude Code] Skipped (user opted out)");
 
     // ── Apply to Gemini CLI config ───────────────────────────────────────
 
@@ -504,4 +515,229 @@ static void Run(string[] args)
         Directory.CreateDirectory(openCodeDir);
         ModifyOpenCodeConfig(Path.Combine(openCodeDir, "opencode.json"), "OpenCode");
     }
+
+    // ── Apply to Cursor config ────────────────────────────────────────────
+
+    if (regCursor || (uninstall && File.Exists(Path.Combine(configDir, ".cursor", "mcp.json"))))
+    {
+        var cursorDir = Path.Combine(configDir, ".cursor");
+        Directory.CreateDirectory(cursorDir);
+        ModifyConfig(Path.Combine(cursorDir, "mcp.json"), "Cursor");
+    }
+
+    // ── Apply to Windsurf config ──────────────────────────────────────────
+
+    if (regWindsurf || (uninstall && File.Exists(Path.Combine(configDir, ".codeium", "windsurf", "mcp_config.json"))))
+    {
+        var windsurfDir = Path.Combine(configDir, ".codeium", "windsurf");
+        Directory.CreateDirectory(windsurfDir);
+        ModifyConfig(Path.Combine(windsurfDir, "mcp_config.json"), "Windsurf");
+    }
+
+    // ── Apply to Zed config ───────────────────────────────────────────────
+
+    string GetZedConfigPath()
+    {
+        var appData = Environment.GetEnvironmentVariable("APPDATA");
+        if (!string.IsNullOrEmpty(appData))
+            return Path.Combine(appData, "Zed", "settings.json");
+        return Path.Combine(configDir, ".config", "zed", "settings.json");
+    }
+
+    if (regZed || (uninstall && File.Exists(GetZedConfigPath())))
+    {
+        ModifyZedConfig(GetZedConfigPath(), "Zed");
+    }
+
+    void ModifyZedConfig(string configPath, string label)
+{
+    var backupPath = configPath + ".llm-backup";
+
+    JsonNode? config;
+    if (File.Exists(configPath))
+    {
+        try
+        {
+            var text = File.ReadAllText(configPath);
+            config = JsonNode.Parse(text);
+            if (config is not JsonObject)
+                throw new InvalidOperationException("Root is not a JSON object");
+            Log.Information("Read Zed config from {Path}", configPath);
+        }
+        catch (Exception ex)
+        {
+            Log.Warning("Zed config is corrupt — backing up and recreating: {Error}", ex.Message);
+            File.Copy(configPath, backupPath, overwrite: true);
+            Log.Information("Backed up corrupt file to {Path}", backupPath);
+            config = new JsonObject();
+        }
+    }
+    else
+    {
+        Log.Information("No {Label} config found — will create new", label);
+        config = new JsonObject();
+    }
+
+    var root = (JsonObject)config;
+    var modified = false;
+
+    if (uninstall)
+    {
+        if (root.TryGetPropertyValue("context_servers", out var node) && node is JsonObject cs)
+        {
+            var removedRowster           = cs.Remove("Rowster");
+            var removedFReader           = cs.Remove("FReader");
+            var removedCliSilentProxy    = cs.Remove("CliSilentProxy");
+            var removedFWriter           = cs.Remove("FWriter");
+            var removedContractGenerator = cs.Remove("ContractGenerator");
+            var removedCodeNavigator     = cs.Remove("CodeNavigator");
+            if (removedRowster)           { modified = true; Log.Information("[{Label}] Removed Rowster", label); }
+            if (removedFReader)           { modified = true; Log.Information("[{Label}] Removed FReader", label); }
+            if (removedCliSilentProxy)    { modified = true; Log.Information("[{Label}] Removed CliSilentProxy", label); }
+            if (removedFWriter)           { modified = true; Log.Information("[{Label}] Removed FWriter", label); }
+            if (removedContractGenerator) { modified = true; Log.Information("[{Label}] Removed ContractGenerator", label); }
+            if (removedCodeNavigator)     { modified = true; Log.Information("[{Label}] Removed CodeNavigator", label); }
+            if (!removedRowster && !removedFReader && !removedCliSilentProxy && !removedFWriter && !removedContractGenerator && !removedCodeNavigator)
+                Log.Information("[{Label}] No MCP server entries found", label);
+            if (cs.Count == 0) { root.Remove("context_servers"); modified = true; Log.Information("[{Label}] context_servers is empty — removed key", label); }
+        }
+        else
+        {
+            Log.Information("[{Label}] No context_servers key found", label);
+        }
+    }
+    else
+    {
+        if (!root.TryGetPropertyValue("context_servers", out var node) || node is not JsonObject cs)
+        {
+            cs = new JsonObject();
+            root["context_servers"] = cs;
+        }
+
+        if (regRowster && rowsterPath != null)
+        {
+            cs["Rowster"] = new JsonObject
+            {
+                ["command"] = new JsonObject
+                {
+                    ["path"] = rowsterPath,
+                    ["args"] = new JsonArray("--mcp")
+                }
+            };
+            modified = true;
+            Log.Information("[{Label}] Registered Rowster", label);
+        }
+
+        if (regFReader && freaderPath != null)
+        {
+            cs["FReader"] = new JsonObject
+            {
+                ["command"] = new JsonObject
+                {
+                    ["path"] = freaderPath,
+                    ["args"] = new JsonArray("--mcp")
+                }
+            };
+            modified = true;
+            Log.Information("[{Label}] Registered FReader", label);
+        }
+
+        if (regCliSilentProxy && cliSilentProxyPath != null)
+        {
+            cs["CliSilentProxy"] = new JsonObject
+            {
+                ["command"] = new JsonObject
+                {
+                    ["path"] = cliSilentProxyPath,
+                    ["args"] = new JsonArray("--mcp")
+                }
+            };
+            modified = true;
+            Log.Information("[{Label}] Registered CliSilentProxy", label);
+        }
+
+        if (regFWriter && fwriterPath != null)
+        {
+            cs["FWriter"] = new JsonObject
+            {
+                ["command"] = new JsonObject
+                {
+                    ["path"] = fwriterPath,
+                    ["args"] = new JsonArray("--mcp")
+                }
+            };
+            modified = true;
+            Log.Information("[{Label}] Registered FWriter", label);
+        }
+
+        if (regContractGenerator && contractGeneratorPath != null)
+        {
+            cs["ContractGenerator"] = new JsonObject
+            {
+                ["command"] = new JsonObject
+                {
+                    ["path"] = contractGeneratorPath,
+                    ["args"] = new JsonArray("--mcp")
+                }
+            };
+            modified = true;
+            Log.Information("[{Label}] Registered ContractGenerator", label);
+        }
+
+        if (regCodeNavigator && codeNavigatorPath != null)
+        {
+            cs["CodeNavigator"] = new JsonObject
+            {
+                ["command"] = new JsonObject
+                {
+                    ["path"] = codeNavigatorPath,
+                    ["args"] = new JsonArray("--mcp")
+                }
+            };
+            modified = true;
+            Log.Information("[{Label}] Registered CodeNavigator", label);
+        }
+    }
+
+    if (!modified)
+    {
+        Log.Information("[{Label}] No changes needed", label);
+        return;
+    }
+
+    var json = root.ToJsonString(new JsonSerializerOptions { WriteIndented = true });
+    try
+    {
+        if (File.Exists(configPath))
+        {
+            File.Copy(configPath, backupPath, overwrite: true);
+            Log.Information("[{Label}] Backed up to {Path}", label, backupPath);
+        }
+        File.WriteAllText(configPath, json);
+        try
+        {
+            var check = File.ReadAllText(configPath);
+            if (JsonNode.Parse(check) == null)
+                throw new InvalidOperationException("Parsed result is null");
+            Log.Information("[{Label}] Write validated successfully", label);
+        }
+        catch (Exception ex)
+        {
+            throw new InvalidOperationException($"Write validation FAILED: {ex.Message}");
+        }
+        if (File.Exists(backupPath)) { File.Delete(backupPath); Log.Information("[{Label}] Backup cleaned up", label); }
+        Log.Information("[{Label}] Config updated successfully", label);
+    }
+    catch (Exception ex)
+    {
+        Log.Error(ex, "[{Label}] Failed to update config", label);
+        if (File.Exists(backupPath))
+        {
+            Log.Information("[{Label}] Restoring backup...", label);
+            File.Copy(backupPath, configPath, overwrite: true);
+            File.Delete(backupPath);
+            Log.Information("[{Label}] Backup restored — config is safe", label);
+        }
+    }
+}
 }

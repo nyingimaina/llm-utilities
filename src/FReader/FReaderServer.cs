@@ -6,6 +6,7 @@ namespace FReader;
 sealed class FReaderServer : McpServerBase, IDisposable
 {
     protected override bool RequiresTimeoutMs(string toolName) => toolName != "record_benchmark";
+    protected override int? DefaultTimeoutMs(string toolName) => toolName == "grep" || toolName == "search_function" ? 60000 : 30000;
     public void Dispose() => ProviderFactory.Shutdown();
     const string Harness = """
 === FReader -- mandatory harness ===
@@ -48,7 +49,7 @@ COMPACT FIELDS: _r=rows _h=headers _line_start/_line_end=range _sig=signature _t
             new McpTool
             {
                 Name = "read",
-                Description = "Read lines from a file. Tab-prefix format. Supports stripImports, normalizeIndent, aliases. Truncates at truncate param (default 200), returns _truncated + _next continuation. Requires timeoutMs.",
+                Description = "Read lines from a file. Tab-prefix format. Supports stripImports, normalizeIndent, aliases. Truncates at truncate param (default 200), returns _truncated + _next continuation.",
                 InputSchema = new
                 {
                     type = "object",
@@ -61,26 +62,26 @@ COMPACT FIELDS: _r=rows _h=headers _line_start/_line_end=range _sig=signature _t
                         stripImports = new { type = "boolean" },
                         normalizeIndent = new { type = "boolean" },
                         aliases = new { type = "boolean", description = "Alias repeated type names (default false)" },
-                        timeoutMs = new { type = "integer", description = "Max wait in ms (max 120000). Required." }
+                        timeoutMs = new { type = "integer", description = "Max wait in ms (max 120000). Default 30000." }
                     },
-                    required = new[] { "path", "timeoutMs" }
+                    required = new[] { "path" }
                 }
             },
             new McpTool
             {
                 Name = "info",
-                Description = "File metadata (size, lines, encoding). Requires timeoutMs.",
+                Description = "File metadata (size, lines, encoding).",
                 InputSchema = new
                 {
                     type = "object",
-                    properties = new { path = new { type = "string" }, timeoutMs = new { type = "integer", description = "Max wait in ms (max 120000). Required." } },
-                    required = new[] { "path", "timeoutMs" }
+                    properties = new { path = new { type = "string" }, timeoutMs = new { type = "integer", description = "Max wait in ms (max 120000). Default 30000." } },
+                    required = new[] { "path" }
                 }
             },
             new McpTool
             {
                 Name = "list_functions",
-                Description = "List functions in source file. Columnar with lineEnd. includeSystem filter. Requires timeoutMs.",
+                Description = "List functions in source file. Columnar with lineEnd. includeSystem filter.",
                 InputSchema = new
                 {
                     type = "object",
@@ -88,15 +89,15 @@ COMPACT FIELDS: _r=rows _h=headers _line_start/_line_end=range _sig=signature _t
                     {
                         path = new { type = "string" },
                         includeSystem = new { type = "boolean" },
-                        timeoutMs = new { type = "integer", description = "Max wait in ms (max 120000). Required." }
+                        timeoutMs = new { type = "integer", description = "Max wait in ms (max 120000). Default 30000." }
                     },
-                    required = new[] { "path", "timeoutMs" }
+                    required = new[] { "path" }
                 }
             },
             new McpTool
             {
                 Name = "extract_function",
-                Description = "Get line range(s) of named function. Overload disambiguation via parameterTypes. Requires timeoutMs.",
+                Description = "Get line range(s) of named function. Overload disambiguation via parameterTypes.",
                 InputSchema = new
                 {
                     type = "object",
@@ -106,15 +107,15 @@ COMPACT FIELDS: _r=rows _h=headers _line_start/_line_end=range _sig=signature _t
                         name = new { type = "string" },
                         parameterTypes = new { type = "array", items = new { type = "string" }, description = "Overload disambiguation" },
                         className = new { type = "string", description = "Class for cross-class disambiguation" },
-                        timeoutMs = new { type = "integer", description = "Max wait in ms (max 120000). Required." }
+                        timeoutMs = new { type = "integer", description = "Max wait in ms (max 120000). Default 30000." }
                     },
-                    required = new[] { "path", "name", "timeoutMs" }
+                    required = new[] { "path", "name" }
                 }
             },
             new McpTool
             {
                 Name = "read_function",
-                Description = "Read named function body. Supports overloads, className, docs, stripImports, aliases. Requires timeoutMs.",
+                Description = "Read named function body. Supports overloads, className, docs, stripImports, aliases.",
                 InputSchema = new
                 {
                     type = "object",
@@ -128,15 +129,15 @@ COMPACT FIELDS: _r=rows _h=headers _line_start/_line_end=range _sig=signature _t
                         stripImports = new { type = "boolean" },
                         normalizeIndent = new { type = "boolean" },
                         aliases = new { type = "boolean" },
-                        timeoutMs = new { type = "integer", description = "Max wait in ms (max 120000). Required." }
+                        timeoutMs = new { type = "integer", description = "Max wait in ms (max 120000). Default 30000." }
                     },
-                    required = new[] { "path", "name", "timeoutMs" }
+                    required = new[] { "path", "name" }
                 }
             },
             new McpTool
             {
                 Name = "read_functions",
-                Description = "Batch-read multiple functions. Merges adjacent ranges. maxChars cap. Requires timeoutMs.",
+                Description = "Batch-read multiple functions. Merges adjacent ranges. maxChars cap.",
                 InputSchema = new
                 {
                     type = "object",
@@ -148,15 +149,15 @@ COMPACT FIELDS: _r=rows _h=headers _line_start/_line_end=range _sig=signature _t
                         normalizeIndent = new { type = "boolean" },
                         aliases = new { type = "boolean" },
                         maxChars = new { type = "integer", description = "Hard cap on response chars (default 8000)" },
-                        timeoutMs = new { type = "integer", description = "Max wait in ms (max 120000). Required." }
+                        timeoutMs = new { type = "integer", description = "Max wait in ms (max 120000). Default 30000." }
                     },
-                    required = new[] { "path", "names", "timeoutMs" }
+                    required = new[] { "path", "names" }
                 }
             },
             new McpTool
             {
                 Name = "summarize",
-                Description = "Structural overview: namespace, classes, attrs, sigs. 87-96% savings. Supports aliases. Requires timeoutMs.",
+                Description = "Structural overview: namespace, classes, attrs, sigs. 87-96% savings. Supports aliases.",
                 InputSchema = new
                 {
                     type = "object",
@@ -164,15 +165,15 @@ COMPACT FIELDS: _r=rows _h=headers _line_start/_line_end=range _sig=signature _t
                     {
                         path = new { type = "string" },
                         aliases = new { type = "boolean" },
-                        timeoutMs = new { type = "integer", description = "Max wait in ms (max 120000). Required." }
+                        timeoutMs = new { type = "integer", description = "Max wait in ms (max 120000). Default 30000." }
                     },
-                    required = new[] { "path", "timeoutMs" }
+                    required = new[] { "path" }
                 }
             },
             new McpTool
             {
                 Name = "grep_in_file",
-                Description = "Regex search within a file. Merges overlapping context windows. Requires timeoutMs.",
+                Description = "Regex search within a file. Merges overlapping context windows.",
                 InputSchema = new
                 {
                     type = "object",
@@ -183,15 +184,15 @@ COMPACT FIELDS: _r=rows _h=headers _line_start/_line_end=range _sig=signature _t
                         context = new { type = "integer" },
                         caseSensitive = new { type = "boolean" },
                         maxMatches = new { type = "integer" },
-                        timeoutMs = new { type = "integer", description = "Max wait in ms (max 120000). Required." }
+                        timeoutMs = new { type = "integer", description = "Max wait in ms (max 120000). Default 30000." }
                     },
-                    required = new[] { "path", "pattern", "timeoutMs" }
+                    required = new[] { "path", "pattern" }
                 }
             },
             new McpTool
             {
                 Name = "search_function",
-                Description = "Search directory tree for named function. Regex+Roslyn. Excludes obj/bin by default. Supports progress pings. Requires timeoutMs.",
+                Description = "Search directory tree for named function. Regex+Roslyn. Excludes obj/bin by default. Supports progress pings.",
                 InputSchema = new
                 {
                     type = "object",
@@ -202,15 +203,15 @@ COMPACT FIELDS: _r=rows _h=headers _line_start/_line_end=range _sig=signature _t
                         fileExtensions = new { type = "array", items = new { type = "string" }, description = "File types (default [.cs])" },
                         limit = new { type = "integer", description = "Max matches (default 20)" },
                         includeGenerated = new { type = "boolean", description = "Include obj/bin/generated files (default false)" },
-                        timeoutMs = new { type = "integer", description = "Max wait in ms (max 120000). Required." }
+                        timeoutMs = new { type = "integer", description = "Max wait in ms (max 120000). Default 60000." }
                     },
-                    required = new[] { "rootPath", "name", "timeoutMs" }
+                    required = new[] { "rootPath", "name" }
                 }
             },
             new McpTool
             {
                 Name = "grep",
-                Description = "Cross-file regex search with context windows. Supports progress pings. Requires timeoutMs.",
+                Description = "Cross-file regex search with context windows. Supports progress pings.",
                 InputSchema = new
                 {
                     type = "object",
@@ -223,9 +224,9 @@ COMPACT FIELDS: _r=rows _h=headers _line_start/_line_end=range _sig=signature _t
                         maxMatches = new { type = "integer", description = "Global cap (default 50)" },
                         caseSensitive = new { type = "boolean", description = "Case-sensitive match (default false)" },
                         includeGenerated = new { type = "boolean", description = "Include obj/bin/generated files (default false)" },
-                        timeoutMs = new { type = "integer", description = "Max wait in ms (max 120000). Required." }
+                        timeoutMs = new { type = "integer", description = "Max wait in ms (max 120000). Default 60000." }
                     },
-                    required = new[] { "rootPath", "pattern", "timeoutMs" }
+                    required = new[] { "rootPath", "pattern" }
                 }
             },
             new McpTool
@@ -766,7 +767,15 @@ COMPACT FIELDS: _r=rows _h=headers _line_start/_line_end=range _sig=signature _t
             "DO NOT use FReader for .md/.markdown/.rmd files -- the tab-prefixed format",
             "strips markdown formatting. Use the native file read tool instead.",
             "",
-            "  summarize         | 87-96% compression (prefer over reading entire file)",
+            "Exception: if you are about to edit a file with the native Edit or Write tool,",
+            "use the native Read tool for that file -- not FReader. The native Edit/Write",
+            "tools require a prior native Read and will reject an FReader read as insufficient.",
+            "",
+            "=== GREENFIELD ===",
+            "If the working directory contains no source files, skip summarize,",
+            "list_functions, and read_function -- they return empty results.",
+            "Use FWriter create_file instead.",
+            "",
             "  summarize         | 87-96% compression (prefer over reading entire file)",
             "  read_function     | read body in 1 call (prefer over list+extract+read)",
             "  read_functions    | batch read (prefer over multiple read_function)",
@@ -831,6 +840,7 @@ COMPACT FIELDS: _r=rows _h=headers _line_start/_line_end=range _sig=signature _t
             "9. Tab-prefix format: \"N\\tcontent\" -- parse by splitting on first tab",
             "10. Error responses use error + error_code (no underscore prefix)",
             "11. read truncates at 'truncate' param (default 200). _truncated + _next = continuation.",
+            "12. timeoutMs defaults: 30000 for most tools, 60000 for grep/search_function. Omit unless you need longer.",
             "",
         };
         instr.AddRange(GetResiliencySection());
