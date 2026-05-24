@@ -15,6 +15,8 @@ public abstract class McpServerBase
     readonly McpServerConfig _config;
     readonly string _brsDirectory;
     bool _initialized;
+    string? _clientName;
+    bool _startupNotificationSent;
     int _brsCallCounter;
     CancellationTokenSource? _timeoutCts;
     string? _progressToken;
@@ -76,6 +78,10 @@ public abstract class McpServerBase
     {
         if (req.Method == "initialize")
         {
+            // Extract client info for startup notification
+            if (req.Params.HasValue && req.Params.Value.TryGetProperty("clientInfo", out var clientInfo))
+                _clientName = clientInfo.GetProperty("name").GetString();
+
             var resp = new Dictionary<string, object?>
             {
                 ["protocolVersion"] = "2024-11-05",
@@ -94,6 +100,7 @@ public abstract class McpServerBase
         if (req.Method == "notifications/initialized")
         {
             _initialized = true;
+            _ = SendStartupNotification();
             return;
         }
 
@@ -336,34 +343,61 @@ public abstract class McpServerBase
         return result;
     }
 
+    async Task SendStartupNotification()
+    {
+        if (_startupNotificationSent) return;
+        _startupNotificationSent = true;
+
+        var stdin = await AcquireWarmHelperStdin();
+        if (stdin is null) return;
+
+        var llmName = _clientName ?? "LLM";
+        var startup = new
+        {
+            title = $"{llmName} — Notifications Active",
+            message = $"{llmName} running with notifications powered by LLM Utilities",
+            type = "info",
+            sound = true,
+            dismissAfterMs = 6000,
+            sender = "LLM Utilities",
+            task = "startup"
+        };
+        var json = JsonSerializer.Serialize(startup, _json);
+        await stdin.WriteLineAsync(json);
+        await stdin.FlushAsync();
+    }
+
+    async Task<TextWriter?> AcquireWarmHelperStdin()
+    {
+        var helperName = OperatingSystem.IsWindows() ? "NotifierHelper.exe" : "NotifierHelper";
+        var helper = Path.Combine(AppContext.BaseDirectory, helperName);
+        if (!File.Exists(helper)) return null;
+
+        lock (_warmLock)
+        {
+            if (_warmHelper != null && !_warmHelper.HasExited)
+                return _warmHelperStdin;
+
+            var psi = new ProcessStartInfo
+            {
+                FileName = helper,
+                UseShellExecute = false,
+                CreateNoWindow = true,
+                RedirectStandardInput = true,
+            };
+            psi.ArgumentList.Add("--listen");
+            _warmHelper = Process.Start(psi);
+            _warmHelperStdin = _warmHelper?.StandardInput;
+            return _warmHelperStdin;
+        }
+    }
+
     async Task FireWarmNotification(long elapsedMs)
     {
         try
         {
-            var helperName = OperatingSystem.IsWindows() ? "NotifierHelper.exe" : "NotifierHelper";
-            var helper = Path.Combine(AppContext.BaseDirectory, helperName);
-            if (!File.Exists(helper)) return;
-
-            Process? proc;
-            lock (_warmLock)
-            {
-                if (_warmHelper == null || _warmHelper.HasExited)
-                {
-                    var psi = new ProcessStartInfo
-                    {
-                        FileName = helper,
-                        UseShellExecute = false,
-                        CreateNoWindow = true,
-                        RedirectStandardInput = true,
-                    };
-                    psi.ArgumentList.Add("--listen");
-                    _warmHelper = Process.Start(psi);
-                    _warmHelperStdin = _warmHelper?.StandardInput;
-                }
-                proc = _warmHelper;
-            }
-
-            if (proc == null) return;
+            var stdin = await AcquireWarmHelperStdin();
+            if (stdin is null) return;
 
             var req = new
             {
@@ -376,15 +410,20 @@ public abstract class McpServerBase
                 task = _config.Name
             };
             var json = JsonSerializer.Serialize(req, _json);
-            await _warmHelperStdin!.WriteLineAsync(json);
-            await _warmHelperStdin.FlushAsync();
+            await stdin.WriteLineAsync(json);
+            await stdin.FlushAsync();
         }
         catch
         {
-            // Warm helper failed → fallback to cold-start
+            // Warm helper failed → try graceful shutdown, then kill
             lock (_warmLock)
             {
-                if (_warmHelper != null) { try { _warmHelper.Kill(); } catch { } }
+                if (_warmHelperStdin != null)
+                {
+                    try { _warmHelperStdin.WriteLine("{\"__shutdown__\":true}"); _warmHelperStdin.Flush(); } catch { }
+                    try { _warmHelperStdin.Close(); } catch { }
+                }
+                if (_warmHelper != null) { try { _warmHelper.WaitForExit(2000); _warmHelper.Kill(); } catch { } }
                 _warmHelper = null;
                 _warmHelperStdin = null;
             }

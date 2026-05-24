@@ -1,6 +1,7 @@
 using System.Text.Json;
 using System.Text.Json.Serialization;
 using Avalonia;
+using Avalonia.Controls;
 using Avalonia.Controls.ApplicationLifetimes;
 using Avalonia.Markup.Xaml;
 using Avalonia.Threading;
@@ -22,8 +23,15 @@ public partial class App : Application
 
             if (args.Contains("--listen"))
             {
-                desktop.ShutdownMode = Avalonia.Controls.ShutdownMode.OnExplicitShutdown;
-                _ = ListenStdin(desktop);
+                var anchor = new Window
+                {
+                    IsVisible = false,
+                    Width = 0,
+                    Height = 0,
+                    ShowInTaskbar = false,
+                };
+                anchor.Show();
+                _ = ListenStdin(desktop, anchor);
             }
             else
             {
@@ -53,7 +61,7 @@ public partial class App : Application
         base.OnFrameworkInitializationCompleted();
     }
 
-    static async Task ListenStdin(IClassicDesktopStyleApplicationLifetime desktop)
+    static async Task ListenStdin(IClassicDesktopStyleApplicationLifetime desktop, Window anchor)
     {
         try
         {
@@ -62,6 +70,7 @@ public partial class App : Application
             while ((line = await stdin.ReadLineAsync()) != null)
             {
                 if (string.IsNullOrWhiteSpace(line)) continue;
+                if (line.Contains("__shutdown__")) break;
                 try
                 {
                     var req = JsonSerializer.Deserialize<NotifyRequest>(line);
@@ -77,6 +86,16 @@ public partial class App : Application
                             req.Sender,
                             req.Task);
                         win.Show();
+
+                        var dismissMs = req.DismissAfterMs ?? 5000;
+                        if (dismissMs > 0)
+                        {
+                            _ = Task.Run(async () =>
+                            {
+                                await Task.Delay(dismissMs);
+                                await Dispatcher.UIThread.InvokeAsync(() => win.Close());
+                            });
+                        }
                     });
                 }
                 catch { /* skip malformed line */ }
@@ -85,7 +104,7 @@ public partial class App : Application
         catch { /* stdin closed */ }
         finally
         {
-            await Dispatcher.UIThread.InvokeAsync(() => desktop.Shutdown());
+            await Dispatcher.UIThread.InvokeAsync(() => anchor.Close());
         }
     }
 

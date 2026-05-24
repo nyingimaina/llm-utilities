@@ -1,5 +1,5 @@
 #define MyAppName      "LLM Utilities"
-#define MyAppVersion   "1.27.0"
+#define MyAppVersion   "1.29.0"
 #define MyAppPublisher "Savanna HerdIQ"
 #define PublishDir     "publish"
 #define ReadmeFile     "README.md"
