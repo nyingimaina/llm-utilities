@@ -421,42 +421,46 @@ public partial class ToastWindow : Window
             var tempPath = Path.Combine(Path.GetTempPath(), $"notifier_{Guid.NewGuid():N}.wav");
             await File.WriteAllBytesAsync(tempPath, wav);
 
-            if (OperatingSystem.IsWindows())
+            // Run process + WaitForExit on background thread to avoid blocking UI
+            await Task.Run(() =>
             {
-                var psi = new System.Diagnostics.ProcessStartInfo
+                if (OperatingSystem.IsWindows())
                 {
-                    FileName = "powershell",
-                    Arguments = $"-NoProfile -ExecutionPolicy Bypass -Command \"(New-Object Media.SoundPlayer '{tempPath.Replace("'", "''")}').PlaySync()\"",
-                    UseShellExecute = false,
-                    CreateNoWindow = true,
-                };
-                using var proc = System.Diagnostics.Process.Start(psi);
-                proc?.WaitForExit(3000);
-            }
-            else if (OperatingSystem.IsMacOS())
-            {
-                var psi = new System.Diagnostics.ProcessStartInfo
+                    var psi = new System.Diagnostics.ProcessStartInfo
+                    {
+                        FileName = "powershell",
+                        Arguments = $"-NoProfile -ExecutionPolicy Bypass -Command \"(New-Object Media.SoundPlayer '{tempPath.Replace("'", "''")}').PlaySync()\"",
+                        UseShellExecute = false,
+                        CreateNoWindow = true,
+                    };
+                    using var proc = System.Diagnostics.Process.Start(psi);
+                    proc?.WaitForExit(3000);
+                }
+                else if (OperatingSystem.IsMacOS())
                 {
-                    FileName = "afplay",
-                    Arguments = $"\"{tempPath}\"",
-                    UseShellExecute = false,
-                    CreateNoWindow = true,
-                };
-                using var proc = System.Diagnostics.Process.Start(psi);
-                proc?.WaitForExit(2000);
-            }
-            else if (OperatingSystem.IsLinux())
-            {
-                var psi = new System.Diagnostics.ProcessStartInfo
+                    var psi = new System.Diagnostics.ProcessStartInfo
+                    {
+                        FileName = "afplay",
+                        Arguments = $"\"{tempPath}\"",
+                        UseShellExecute = false,
+                        CreateNoWindow = true,
+                    };
+                    using var proc = System.Diagnostics.Process.Start(psi);
+                    proc?.WaitForExit(2000);
+                }
+                else if (OperatingSystem.IsLinux())
                 {
-                    FileName = "aplay",
-                    Arguments = $"\"{tempPath}\"",
-                    UseShellExecute = false,
-                    CreateNoWindow = true,
-                };
-                using var proc = System.Diagnostics.Process.Start(psi);
-                proc?.WaitForExit(2000);
-            }
+                    var psi = new System.Diagnostics.ProcessStartInfo
+                    {
+                        FileName = "aplay",
+                        Arguments = $"\"{tempPath}\"",
+                        UseShellExecute = false,
+                        CreateNoWindow = true,
+                    };
+                    using var proc = System.Diagnostics.Process.Start(psi);
+                    proc?.WaitForExit(2000);
+                }
+            });
 
             try { File.Delete(tempPath); } catch { }
         }

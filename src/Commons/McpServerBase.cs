@@ -15,16 +15,11 @@ public abstract class McpServerBase
     readonly McpServerConfig _config;
     readonly string _brsDirectory;
     bool _initialized;
-    string? _clientName;
-    bool _startupNotificationSent;
     int _brsCallCounter;
     CancellationTokenSource? _timeoutCts;
     string? _progressToken;
     bool _canNotify;
     readonly Queue<long> _notifyTimestamps = new();
-    readonly object _warmLock = new();
-    Process? _warmHelper;
-    TextWriter? _warmHelperStdin;
 
     protected CancellationToken CancellationToken => _timeoutCts?.Token ?? System.Threading.CancellationToken.None;
 
@@ -78,10 +73,6 @@ public abstract class McpServerBase
     {
         if (req.Method == "initialize")
         {
-            // Extract client info for startup notification
-            if (req.Params.HasValue && req.Params.Value.TryGetProperty("clientInfo", out var clientInfo))
-                _clientName = clientInfo.GetProperty("name").GetString();
-
             var resp = new Dictionary<string, object?>
             {
                 ["protocolVersion"] = "2024-11-05",
@@ -100,7 +91,6 @@ public abstract class McpServerBase
         if (req.Method == "notifications/initialized")
         {
             _initialized = true;
-            _ = SendStartupNotification();
             return;
         }
 
@@ -338,97 +328,9 @@ public abstract class McpServerBase
             return obj;
         }
 
-        // LLM did not opt in → fire notification via warm helper
-        _ = FireWarmNotification(elapsedMs);
+        // LLM did not opt in → fire cold notification
+        _ = Task.Run(() => ColdFireNotification(elapsedMs));
         return result;
-    }
-
-    async Task SendStartupNotification()
-    {
-        if (_startupNotificationSent) return;
-        _startupNotificationSent = true;
-
-        var stdin = await AcquireWarmHelperStdin();
-        if (stdin is null) return;
-
-        var llmName = _clientName ?? "LLM";
-        var startup = new
-        {
-            title = $"{llmName} — Notifications Active",
-            message = $"{llmName} running with notifications powered by LLM Utilities",
-            type = "info",
-            sound = true,
-            dismissAfterMs = 6000,
-            sender = "LLM Utilities",
-            task = "startup"
-        };
-        var json = JsonSerializer.Serialize(startup, _json);
-        await stdin.WriteLineAsync(json);
-        await stdin.FlushAsync();
-    }
-
-    async Task<TextWriter?> AcquireWarmHelperStdin()
-    {
-        var helperName = OperatingSystem.IsWindows() ? "NotifierHelper.exe" : "NotifierHelper";
-        var helper = Path.Combine(AppContext.BaseDirectory, helperName);
-        if (!File.Exists(helper)) return null;
-
-        lock (_warmLock)
-        {
-            if (_warmHelper != null && !_warmHelper.HasExited)
-                return _warmHelperStdin;
-
-            var psi = new ProcessStartInfo
-            {
-                FileName = helper,
-                UseShellExecute = false,
-                CreateNoWindow = true,
-                RedirectStandardInput = true,
-            };
-            psi.ArgumentList.Add("--listen");
-            _warmHelper = Process.Start(psi);
-            _warmHelperStdin = _warmHelper?.StandardInput;
-            return _warmHelperStdin;
-        }
-    }
-
-    async Task FireWarmNotification(long elapsedMs)
-    {
-        try
-        {
-            var stdin = await AcquireWarmHelperStdin();
-            if (stdin is null) return;
-
-            var req = new
-            {
-                title = $"{_config.Name}: {elapsedMs / 1000.0:F1}s",
-                message = $"Tool call completed in {elapsedMs / 1000.0:F1}s",
-                type = "info",
-                sound = true,
-                dismissAfterMs = 8000,
-                sender = _config.Name,
-                task = _config.Name
-            };
-            var json = JsonSerializer.Serialize(req, _json);
-            await stdin.WriteLineAsync(json);
-            await stdin.FlushAsync();
-        }
-        catch
-        {
-            // Warm helper failed → try graceful shutdown, then kill
-            lock (_warmLock)
-            {
-                if (_warmHelperStdin != null)
-                {
-                    try { _warmHelperStdin.WriteLine("{\"__shutdown__\":true}"); _warmHelperStdin.Flush(); } catch { }
-                    try { _warmHelperStdin.Close(); } catch { }
-                }
-                if (_warmHelper != null) { try { _warmHelper.WaitForExit(2000); _warmHelper.Kill(); } catch { } }
-                _warmHelper = null;
-                _warmHelperStdin = null;
-            }
-            ColdFireNotification(elapsedMs);
-        }
     }
 
     void ColdFireNotification(long elapsedMs)
