@@ -93,6 +93,17 @@ static void Run(string[] args)
     var configDir = Environment.GetEnvironmentVariable("USERPROFILE")
         ?? Environment.GetFolderPath(Environment.SpecialFolder.UserProfile);
 
+    var AllKnownServers = new[] { "Rowster", "FReader", "CliSilentProxy", "Notifier", "FWriter", "ContractGenerator", "CodeNavigator" };
+
+    void RemoveOurServers(JsonObject obj, string label)
+    {
+        foreach (var s in AllKnownServers)
+            if (obj.Remove(s))
+            {
+                Log.Information("[{Label}] Removed stale entry: {Server}", label, s);
+            }
+    }
+
     // ── Helper: modify one config file ───────────────────────────────────
 
     void ModifyConfig(string configPath, string label)
@@ -168,6 +179,7 @@ static void Run(string[] args)
                 ms = new JsonObject();
                 root["mcpServers"] = ms;
             }
+            RemoveOurServers(ms, label);
 
             if (regRowster && rowsterPath != null)
             {
@@ -352,6 +364,7 @@ static void Run(string[] args)
                 ms = new JsonObject();
                 root["mcp"] = ms;
             }
+            RemoveOurServers(ms, label);
 
             if (regRowster && rowsterPath != null)
             {
@@ -545,6 +558,7 @@ static void Run(string[] args)
             cs = new JsonObject();
             root["context_servers"] = cs;
         }
+        RemoveOurServers(cs, label);
 
         if (regRowster && rowsterPath != null)
         {
