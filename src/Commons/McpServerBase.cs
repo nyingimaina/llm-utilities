@@ -4,6 +4,7 @@ using System.Text.Encodings.Web;
 using System.Text.Json;
 using System.Text.Json.Nodes;
 using System.Text.Json.Serialization;
+using System.Threading.Channels;
 using Serilog;
 using System.Runtime.InteropServices;
 
@@ -16,6 +17,7 @@ public abstract class McpServerBase
     readonly JsonSerializerOptions _json;
     readonly McpServerConfig _config;
     volatile bool _initialized;
+    readonly object _writeLock = new();
     CancellationTokenSource? _timeoutCts;
     string? _progressToken;
     bool _canNotify;
@@ -62,6 +64,29 @@ public abstract class McpServerBase
         _input = input;
         _output = output;
 
+        // Tool calls run on a dedicated serial worker thread so the I/O read loop is
+        // never blocked by a long-running tool (e.g. a shell command or Roslyn analysis).
+        // Fast-path messages (protocol handshake, tools/list, get_instructions) are
+        // handled inline on the I/O thread and always respond immediately.
+        var toolQueue = Channel.CreateUnbounded<JsonRpcRequest>(new UnboundedChannelOptions
+        {
+            SingleReader = true,
+            SingleWriter = true,
+        });
+
+        var toolWorker = Task.Run(async () =>
+        {
+            await foreach (var req in toolQueue.Reader.ReadAllAsync())
+            {
+                try { HandleCore(req); }
+                catch (Exception ex)
+                {
+                    Log.Error(ex, "Unhandled exception in tool worker for {Method}", req.Method);
+                    WriteError(req.Id, -32603, $"Internal error: {ex.Message}");
+                }
+            }
+        });
+
         while (true)
         {
             var line = _input.ReadLine();
@@ -73,12 +98,34 @@ public abstract class McpServerBase
 
             if (req is null) continue;
 
-            try { HandleCore(req); }
-            catch (Exception ex) { Log.Error(ex, "Unhandled exception handling request {Method}", req.Method); WriteError(req.Id, -32603, $"Internal error: {ex.Message}"); }
+            // Protocol messages, tools/list, and get_instructions never block — handle inline.
+            if (req.Method is "initialize" or "notifications/initialized" or "tools/list" ||
+                req.Method.StartsWith("notifications/") ||
+                IsGetInstructions(req))
+            {
+                try { HandleCore(req); }
+                catch (Exception ex)
+                {
+                    Log.Error(ex, "Unhandled exception handling {Method}", req.Method);
+                    WriteError(req.Id, -32603, $"Internal error: {ex.Message}");
+                }
+                continue;
+            }
+
+            // All other tool calls go to the serial background worker.
+            toolQueue.Writer.TryWrite(req);
         }
 
+        toolQueue.Writer.Complete();
+        toolWorker.Wait();
         Log.Information("Server shutting down");
     }
+
+    static bool IsGetInstructions(JsonRpcRequest req) =>
+        req.Method == "tools/call" &&
+        req.Params is JsonElement p &&
+        p.TryGetProperty("name", out var n) &&
+        n.GetString() == "get_instructions";
 
     void HandleCore(JsonRpcRequest req)
     {
@@ -257,8 +304,12 @@ public abstract class McpServerBase
 
     protected void WriteResponse(JsonRpcResponse resp)
     {
-        _output.WriteLine(JsonSerializer.Serialize(resp, _json));
-        _output.Flush();
+        var line = JsonSerializer.Serialize(resp, _json);
+        lock (_writeLock)
+        {
+            _output.WriteLine(line);
+            _output.Flush();
+        }
     }
 
     protected void WriteError(object? id, int code, string message)
@@ -503,8 +554,7 @@ public abstract class McpServerBase
             };
             psi.ArgumentList.Add("--data");
             psi.ArgumentList.Add(info.ToJson());
-            using var proc = Process.Start(psi);
-            proc?.WaitForExit(3000);
+            Process.Start(psi);
         }
         catch (Exception ex)
         {
@@ -529,8 +579,12 @@ public abstract class McpServerBase
             }
         };
 
-        _output.WriteLine(notification.ToJsonString(_json));
-        _output.Flush();
+        var line = notification.ToJsonString(_json);
+        lock (_writeLock)
+        {
+            _output.WriteLine(line);
+            _output.Flush();
+        }
     }
 
 
