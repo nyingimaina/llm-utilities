@@ -4,7 +4,7 @@ using LLMUtilities.Commons;
 
 namespace CliSilentProxy;
 
-sealed class CliSilentProxyServer : McpServerBase
+public sealed class CliSilentProxyServer : McpServerBase
 {
     protected override bool RequiresTimeoutMs(string toolName) => toolName == "run";
 

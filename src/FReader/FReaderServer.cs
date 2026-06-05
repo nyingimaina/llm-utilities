@@ -3,7 +3,7 @@ using LLMUtilities.Commons;
 
 namespace FReader;
 
-sealed class FReaderServer : McpServerBase, IDisposable
+public sealed class FReaderServer : McpServerBase, IDisposable
 {
     protected override bool RequiresTimeoutMs(string toolName) => toolName != "record_benchmark";
     protected override int? DefaultTimeoutMs(string toolName) => toolName == "grep" || toolName == "search_function" ? 60000 : 30000;

@@ -5,7 +5,7 @@ using Serilog;
 
 namespace Notifier;
 
-sealed class NotifierServer : McpServerBase
+public sealed class NotifierServer : McpServerBase
 {
     static readonly string HelperPath = Path.Combine(
         AppContext.BaseDirectory,

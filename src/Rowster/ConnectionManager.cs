@@ -3,7 +3,7 @@ using MySql.Data.MySqlClient;
 
 namespace Rowster;
 
-sealed class ConnectionManager : IDisposable
+public sealed class ConnectionManager : IDisposable
 {
     readonly ConcurrentDictionary<string, CachedConnection> _pool = new();
     readonly object _lock = new();

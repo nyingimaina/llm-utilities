@@ -5,7 +5,7 @@ using LLMUtilities.Commons;
 
 namespace Rowster;
 
-sealed class McpServer : McpServerBase, IDisposable
+public sealed class McpServer : McpServerBase, IDisposable
 {
     protected override bool RequiresTimeoutMs(string toolName) => toolName != "ping";
 
@@ -53,19 +53,35 @@ sealed class McpServer : McpServerBase, IDisposable
     {
         string? connStr;
 
+        try { return HandleToolCallInner(name, arguments); }
+        catch (McpErrorException) { throw; }
+        catch (OperationCanceledException) { throw; }
+        catch (Exception ex)
+        {
+            // DB exceptions (connection failure, query error, timeout) become tool errors
+            // so the LLM receives a structured response instead of a protocol-level -32603.
+            throw new McpErrorException(
+                JsonSerializer.Serialize(new { _e = ex.Message, error_code = "DB_ERROR" }));
+        }
+
+        // ReSharper disable once UnreachableCode
+        object HandleToolCallInner(string name, JsonElement? arguments)
+        {
+
         switch (name)
         {
             case "connect":
             {
                 var cs = GetString(arguments, "connection");
                 if (string.IsNullOrEmpty(cs))
-                    throw new McpErrorException("{\"_e\":\"connection is required\"}");
+                    throw new McpErrorException(JsonSerializer.Serialize(new { _e = "connection is required" }));
                 _defaultConnStr = cs;
                 try { _cm.GetOrCreate(cs); }
                 catch (Exception ex)
                 {
                     _defaultConnStr = null;
-                    throw new McpErrorException($"{{\"_e\":\"{ex.Message.Replace("\"", "'")}\"}}");
+                    throw new McpErrorException(
+                        JsonSerializer.Serialize(new { _e = ex.Message }));
                 }
                 return new { _s = "connected" };
             }
@@ -154,8 +170,11 @@ sealed class McpServer : McpServerBase, IDisposable
             }
 
             default:
-                throw new McpErrorException($"{{\"_e\":\"Tool not found: {name}\"}}");
+                throw new McpErrorException(
+                    JsonSerializer.Serialize(new { _e = $"Tool not found: {name}" }));
         }
+
+        } // end HandleToolCallInner
     }
 
     protected override object GetInstructions()
@@ -212,7 +231,8 @@ sealed class McpServer : McpServerBase, IDisposable
     }
 
     void MissingConnection() =>
-        throw new McpErrorException("{\"_e\":\"No connection. Use connect tool or --connection arg.\"}");
+        throw new McpErrorException(
+            JsonSerializer.Serialize(new { _e = "No connection. Use connect() tool or pass connection string." }));
 
     object FormatMcpResult(object raw)
     {
