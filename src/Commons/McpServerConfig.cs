@@ -1,4 +1,5 @@
 using System.Text.Json;
+using Serilog;
 
 namespace LLMUtilities.Commons;
 
@@ -23,7 +24,17 @@ public sealed record McpServerConfig
     {
         if (string.IsNullOrEmpty(configPath) || !File.Exists(configPath))
             return this;
-        var ov = JsonSerializer.Deserialize<McpServerConfigOverride>(File.ReadAllText(configPath));
+        McpServerConfigOverride? ov;
+        try
+        {
+            ov = JsonSerializer.Deserialize<McpServerConfigOverride>(File.ReadAllText(configPath));
+        }
+        catch (Exception ex)
+        {
+            // Log and continue with defaults — a bad config file must not crash the server.
+            Serilog.Log.Warning(ex, "Could not read config overrides from {Path}; using defaults", configPath);
+            return this;
+        }
         if (ov is null) return this;
         return this with
         {

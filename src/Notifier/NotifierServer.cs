@@ -86,7 +86,7 @@ sealed class NotifierServer : McpServerBase
                 return HandleNotifyOnComplete(arguments);
 
             default:
-                throw new McpErrorException("{\"error\":\"Tool not found: " + name + "\"}");
+                throw new McpErrorException(JsonSerializer.Serialize(new { error = $"Tool not found: {name}" }));
         }
     }
 
