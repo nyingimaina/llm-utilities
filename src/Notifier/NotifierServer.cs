@@ -15,7 +15,7 @@ public sealed class NotifierServer : McpServerBase
     {
         Name = "Notifier",
         Version = GetEntryVersion(),
-        AnnouncementDirective = "Desktop notification service: notify() for toast + notify_on_complete() for process completion alerts. Use for long-running tasks and cognitive work milestones.",
+        AnnouncementDirective = "Desktop notification service: notify() for toast + notify_on_complete() for process completion alerts. Use for long-running tasks and cognitive work milestones. Call get_instructions first.",
         HarnessInstructions = "Use Notifier for desktop notifications on completions, errors, and long-running tasks. notify() for instant toasts, notify_on_complete() to wrap a process.",
         InstructionsToolDescription = "MANDATORY FIRST STEP: read critical server instructions before using any other tool. Defines notification patterns and usage conventions.",
     }.WithOverrides(configPath))
@@ -378,6 +378,11 @@ $nodes.Item(1).AppendChild($template.CreateTextNode($m)) > $null;
                 "  outside CliSilentProxy (background scripts, direct invocations). Returns instantly",
                 "  with _pid; fires toast when the process exits. Not needed for CliSilentProxy.run()",
                 "  commands -- those auto-notify unless you want a custom message.",
+                "  WARNING: This is fire-and-forget. After calling it, you CANNOT check if the process",
+                "  succeeded or failed. If you need the exit code or output, use CliSilentProxy.run()",
+                "  instead, which blocks until completion and returns structured results.",
+                "  Use notify_on_complete only for processes you want to launch independently (e.g.,",
+                "  a background script you don't need to monitor from this session).",
                 "",
                 "=== TYPE SELECTION ===",
                 "type:\"error\"  -- build failures, test failures, unexpected errors, crash",

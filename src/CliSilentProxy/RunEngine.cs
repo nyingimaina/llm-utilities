@@ -13,7 +13,7 @@ sealed class RunEngine
     int _nextId = 1;
     const int MaxStoredRuns = 10;
 
-    public RunResult Run(string command, string[] args, string? workDir, int tailLines, int timeoutMs, string? filterPattern, int filterContext = 0, string? extractPattern = null, string? tailMode = null, bool surfaceWarnings = false, int? maxOutputTokens = null, string[]? extraPaths = null)
+    public RunResult Run(string command, string[] args, string? workDir, int tailLines, int timeoutMs, string? filterPattern, int filterContext = 0, string? extractPattern = null, string? tailMode = null, bool surfaceWarnings = false, int? maxOutputTokens = null, string[]? extraPaths = null, bool captureOutput = false)
     {
         var resolvedCmd = ResolveExecutable(command);
         var lines = new List<string>();
@@ -121,13 +121,29 @@ sealed class RunEngine
                 .ToArray();
             surfaceWarningsDigest = warnLines.Length > 0 ? warnLines : null;
             if (parsed is null && string.IsNullOrEmpty(extractPattern))
+            {
+                if (captureOutput)
+                {
+                    var capCompressed = LogCompressor.Compress(rawLines, workDir);
+                    return new RunResult(exitCode, sw.ElapsedMilliseconds, false, cmd, null, null, null, null, false,
+                        SurfaceWarnings: surfaceWarningsDigest, CapturedOutput: capCompressed);
+                }
                 return new RunResult(exitCode, sw.ElapsedMilliseconds, false, cmd, null, null, null, null, false,
                     SurfaceWarnings: surfaceWarningsDigest);
+            }
         }
 
         // Fast path: success without extractPattern, no parser, no surfaceWarnings
         if (parsed is null && exitCode == 0 && !timedOut && string.IsNullOrEmpty(extractPattern))
+        {
+            if (captureOutput)
+            {
+                var capCompressed = LogCompressor.Compress(rawLines, workDir);
+                return new RunResult(exitCode, sw.ElapsedMilliseconds, false, cmd, null, null, null, null, false,
+                    CapturedOutput: capCompressed);
+            }
             return new RunResult(exitCode, sw.ElapsedMilliseconds, false, cmd, null, null, null, null, false);
+        }
 
         // Slow path: compress for extraction or failure analysis
         var compressed = LogCompressor.Compress(rawLines, workDir);
@@ -150,8 +166,9 @@ sealed class RunEngine
                 break;
             }
             extracted ??= [];
+            var capOut = captureOutput ? compressed : null;
             return new RunResult(exitCode, sw.ElapsedMilliseconds, false, cmd, null, null, null, null, false,
-                Extracted: extracted, Parsed: parsed);
+                Extracted: extracted, Parsed: parsed, CapturedOutput: capOut);
         }
 
         var exitContext = compressed.Length >= 3 ? compressed[^3..] : compressed;
@@ -373,7 +390,8 @@ record RunResult(
     Dictionary<string, string>? Extracted = null,
     string? Hint = null,
     ParsedResult? Parsed = null,
-    string[]? SurfaceWarnings = null
+    string[]? SurfaceWarnings = null,
+    string[]? CapturedOutput = null
 );
 
 record FailedRun(int Id, string Cmd, string[] Raw, string[] Compressed);

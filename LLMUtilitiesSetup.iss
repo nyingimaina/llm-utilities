@@ -1,5 +1,5 @@
 #define MyAppName      "LLM Utilities"
-#define MyAppVersion   "1.38.0"
+#define MyAppVersion   "1.41.0"
 #define MyAppPublisher "Savanna HerdIQ"
 #define PublishDir     "publish"
 #define ReadmeFile     "README.md"
@@ -29,6 +29,7 @@ Source: "{#PublishDir}\*.dll";                          DestDir: "{app}"; Flags:
 Source: "{#PublishDir}\*.json";                         DestDir: "{app}"; Flags: ignoreversion skipifsourcedoesntexist
 Source: "{#PublishDir}\runtimes\*";                     DestDir: "{app}\runtimes"; Flags: ignoreversion skipifsourcedoesntexist recursesubdirs createallsubdirs
 Source: "{#ReadmeFile}";                                DestDir: "{app}"; Flags: ignoreversion
+Source: "code-standards.default.md";                   DestDir: "{app}"; Flags: ignoreversion
 
 [Registry]
 Root: HKCU; \
@@ -45,12 +46,14 @@ Name: "{group}\LLM Utilities README"; Filename: "{app}\README.md"
 
 var
   McpPage: TWizardPage;
+  PersistRulesCheckbox: TNewCheckBox;
   LlmPage: TWizardPage;
   ChkSelectAll: TNewCheckBox;
   ChkRowster: TNewCheckBox;
   ChkFReader: TNewCheckBox;
   ChkCliSilentProxy: TNewCheckBox;
   ChkNotifier: TNewCheckBox;
+  ChkComplianceKit: TNewCheckBox;
   ChkLlmSelectAll: TNewCheckBox;
   ChkClaudeCode: TNewCheckBox;
   ChkGemini: TNewCheckBox;
@@ -167,6 +170,7 @@ begin
   ChkFReader.Checked := ChkSelectAll.Checked;
   ChkCliSilentProxy.Checked := ChkSelectAll.Checked;
   ChkNotifier.Checked := ChkSelectAll.Checked;
+  ChkComplianceKit.Checked := ChkSelectAll.Checked;
 end;
 
 procedure LlmSelectAllClick(Sender: TObject);
@@ -232,6 +236,15 @@ begin
   ChkNotifier.Height := 17;
   ChkNotifier.Caption := 'Register Notifier (desktop notification service)';
   ChkNotifier.Checked := True;
+
+  ChkComplianceKit := TNewCheckBox.Create(McpPage);
+  ChkComplianceKit.Parent := McpPage.Surface;
+  ChkComplianceKit.Left := 22;
+  ChkComplianceKit.Top := ChkNotifier.Top + ChkNotifier.Height + 8;
+  ChkComplianceKit.Width := McpPage.SurfaceWidth - 30;
+  ChkComplianceKit.Height := 17;
+  ChkComplianceKit.Caption := 'Register ComplianceKit (code quality audit)';
+  ChkComplianceKit.Checked := True;
 
   // ── Custom wizard page: LLM target checkboxes ────────────────────────────────
 
@@ -341,6 +354,7 @@ begin
     Exec('taskkill.exe', '/f /im NotifierHelper.exe', '', SW_HIDE, ewWaitUntilTerminated, ResultCode);
     Exec('taskkill.exe', '/f /im McpRegistrar.exe', '', SW_HIDE, ewWaitUntilTerminated, ResultCode);
     Exec('taskkill.exe', '/f /im ControlPanel.exe', '', SW_HIDE, ewWaitUntilTerminated, ResultCode);
+    Exec('taskkill.exe', '/f /im ComplianceKit.exe', '', SW_HIDE, ewWaitUntilTerminated, ResultCode);
 
     // Remove old Program Files install if present
     if FindFirst(ExpandConstant('{autopf}\LLMUtilities\*'), FindRec) then
@@ -363,11 +377,13 @@ begin
     SummaryLines.Lines.Add('✓ McpRegistrar.exe installed');
     SummaryLines.Lines.Add('✓ LLMUtilities.Commons.dll installed');
     SummaryLines.Lines.Add('✓ ControlPanel.exe installed');
+    SummaryLines.Lines.Add('✓ ComplianceKit.exe installed');
+    SummaryLines.Lines.Add('✓ code-standards.default.md installed');
     SummaryLines.Lines.Add('✓ Start Menu shortcut created');
     SummaryLines.Lines.Add('✓ LLMUtilities added to system PATH');
 
     // ── MCP registration (Claude Code + optionally Gemini CLI) ─────────────────
-    if (not ChkRowster.Checked) and (not ChkFReader.Checked) and (not ChkCliSilentProxy.Checked) and (not ChkNotifier.Checked) then
+    if (not ChkRowster.Checked) and (not ChkFReader.Checked) and (not ChkCliSilentProxy.Checked) and (not ChkNotifier.Checked) and (not ChkComplianceKit.Checked) then
     begin
       SummaryLines.Lines.Add('');
       SummaryLines.Lines.Add('○ MCP registration skipped');
@@ -384,6 +400,8 @@ begin
         Args := Args + ' --register-clisilentproxy --clisilentproxy-path "' + ExpandConstant('{app}\CliSilentProxy.exe') + '"';
       if ChkNotifier.Checked then
         Args := Args + ' --register-notifier --notifier-path "' + ExpandConstant('{app}\Notifier.exe') + '"';
+      if ChkComplianceKit.Checked then
+        Args := Args + ' --register-complianceofficer --complianceofficer-path "' + ExpandConstant('{app}\ComplianceKit.exe') + '" --complianceofficer-standards "' + ExpandConstant('{app}\code-standards.default.md') + '"';
       if not ChkClaudeCode.Checked then
         Args := Args + ' --skip-claude';
       if ChkGemini.Checked then
@@ -409,6 +427,8 @@ begin
           SummaryLines.Lines.Add('✓ CliSilentProxy registered with LLMs');
         if ChkNotifier.Checked then
           SummaryLines.Lines.Add('✓ Notifier registered with LLMs');
+        if ChkComplianceKit.Checked then
+          SummaryLines.Lines.Add('✓ ComplianceKit registered with LLMs');
         SummaryLines.Lines.Add('');
         SummaryLines.Lines.Add('  Also registered:');
         if ChkGemini.Checked then
@@ -434,6 +454,20 @@ begin
   end;
 end;
 
+// ── Uninstall: persistence checkbox ──────────────────────────────────────────
+
+procedure InitializeUninstallProgressForm;
+begin
+  PersistRulesCheckbox := TNewCheckBox.Create(UninstallProgressForm);
+  PersistRulesCheckbox.Parent := UninstallProgressForm;
+  PersistRulesCheckbox.Left := 20;
+  PersistRulesCheckbox.Top := UninstallProgressForm.Height - 80;
+  PersistRulesCheckbox.Width := UninstallProgressForm.ClientWidth - 40;
+  PersistRulesCheckbox.Height := 17;
+  PersistRulesCheckbox.Caption := 'Keep custom compliance rules (code-standards.md)';
+  PersistRulesCheckbox.Checked := False;
+end;
+
 // ── Uninstall helpers ─────────────────────────────────────────────────────────
 
 procedure CurUninstallStepChanged(CurUninstallStep: TUninstallStep);
@@ -449,5 +483,12 @@ begin
   end;
 
   if CurUninstallStep = usPostUninstall then
+  begin
+    if (PersistRulesCheckbox <> nil) and (not PersistRulesCheckbox.Checked) then
+    begin
+      if FileExists(ExpandConstant('{app}\code-standards.md')) then
+        DeleteFile(ExpandConstant('{app}\code-standards.md'));
+    end;
     RemovePath(ExpandConstant('{app}'));
+  end;
 end;

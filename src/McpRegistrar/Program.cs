@@ -38,6 +38,7 @@ static void Run(string[] args)
     var regFReader = false;
     var regCliSilentProxy = false;
     var regNotifier = false;
+    var regComplianceKit = false;
     var regClaude = true;
     var regGemini = false;
     var regOpenCode = false;
@@ -49,6 +50,8 @@ static void Run(string[] args)
     string? freaderPath = null;
     string? cliSilentProxyPath = null;
     string? notifierPath = null;
+    string? complianceOfficerPath = null;
+    string? complianceOfficerStandards = null;
     for (int i = 0; i < args.Length; i++)
     {
         switch (args[i])
@@ -57,6 +60,7 @@ static void Run(string[] args)
             case "--register-freader": regFReader = true; break;
             case "--register-clisilentproxy": regCliSilentProxy = true; break;
             case "--register-notifier": regNotifier = true; break;
+            case "--register-complianceofficer": regComplianceKit = true; break;
 
             case "--skip-claude": regClaude = false; break;
             case "--register-gemini": regGemini = true; break;
@@ -67,7 +71,9 @@ static void Run(string[] args)
             case "--rowster-path"       when i + 1 < args.Length: rowsterPath       = args[++i]; break;
             case "--freader-path"       when i + 1 < args.Length: freaderPath       = args[++i]; break;
             case "--clisilentproxy-path" when i + 1 < args.Length: cliSilentProxyPath = args[++i]; break;
-            case "--notifier-path"          when i + 1 < args.Length: notifierPath          = args[++i]; break;
+            case "--notifier-path"               when i + 1 < args.Length: notifierPath               = args[++i]; break;
+            case "--complianceofficer-path"      when i + 1 < args.Length: complianceOfficerPath      = args[++i]; break;
+            case "--complianceofficer-standards" when i + 1 < args.Length: complianceOfficerStandards = args[++i]; break;
             case "--uninstall": uninstall = true; break;
             default:
                 Log.Warning("Unknown argument: {Arg}", args[i]);
@@ -75,15 +81,15 @@ static void Run(string[] args)
         }
     }
 
-    if (uninstall && (regRowster || regFReader || regCliSilentProxy || regNotifier || regGemini || regOpenCode || regCursor || regWindsurf || regZed))
+    if (uninstall && (regRowster || regFReader || regCliSilentProxy || regNotifier || regComplianceKit || regGemini || regOpenCode || regCursor || regWindsurf || regZed))
     {
         Log.Error("Cannot combine --uninstall with --register-* flags");
         Environment.Exit(1);
     }
 
-    if (!uninstall && !regRowster && !regFReader && !regCliSilentProxy && !regNotifier && !regGemini && !regOpenCode && !regCursor && !regWindsurf && !regZed)
+    if (!uninstall && !regRowster && !regFReader && !regCliSilentProxy && !regNotifier && !regComplianceKit && !regGemini && !regOpenCode && !regCursor && !regWindsurf && !regZed)
     {
-        Log.Information("Usage: McpRegistrar [--register-rowster --rowster-path <path>] [--register-freader --freader-path <path>] [--register-clisilentproxy --clisilentproxy-path <path>] [--register-notifier --notifier-path <path>] [--skip-claude] [--register-gemini] [--register-opencode] [--register-cursor] [--register-windsurf] [--register-zed]");
+        Log.Information("Usage: McpRegistrar [--register-rowster --rowster-path <path>] [--register-freader --freader-path <path>] [--register-clisilentproxy --clisilentproxy-path <path>] [--register-notifier --notifier-path <path>] [--register-complianceofficer --complianceofficer-path <path> --complianceofficer-standards <path>] [--skip-claude] [--register-gemini] [--register-opencode] [--register-cursor] [--register-windsurf] [--register-zed]");
         Log.Information("       McpRegistrar --uninstall");
         return;
     }
@@ -91,7 +97,7 @@ static void Run(string[] args)
     var configDir = Environment.GetEnvironmentVariable("USERPROFILE")
         ?? Environment.GetFolderPath(Environment.SpecialFolder.UserProfile);
 
-    var AllKnownServers = new[] { "Rowster", "FReader", "CliSilentProxy", "Notifier", "FWriter", "ContractGenerator", "CodeNavigator" };
+    var AllKnownServers = new[] { "Rowster", "FReader", "CliSilentProxy", "Notifier", "ComplianceKit", "FWriter", "ContractGenerator", "CodeNavigator" };
 
     void RemoveOurServers(JsonObject obj, string label)
     {
@@ -147,15 +153,17 @@ static void Run(string[] args)
 
             if (root.TryGetPropertyValue("mcpServers", out var node) && node is JsonObject ms)
             {
-                var removedRowster           = ms.Remove("Rowster");
-                var removedFReader           = ms.Remove("FReader");
-                var removedCliSilentProxy    = ms.Remove("CliSilentProxy");
-                var removedNotifier          = ms.Remove("Notifier");
-                if (removedRowster)           { modified = true; Log.Information("[{Label}] Removed Rowster", label); }
-                if (removedFReader)           { modified = true; Log.Information("[{Label}] Removed FReader", label); }
-                if (removedCliSilentProxy)    { modified = true; Log.Information("[{Label}] Removed CliSilentProxy", label); }
-                if (removedNotifier)          { modified = true; Log.Information("[{Label}] Removed Notifier", label); }
-                if (!removedRowster && !removedFReader && !removedCliSilentProxy && !removedNotifier)
+                var removedRowster              = ms.Remove("Rowster");
+                var removedFReader              = ms.Remove("FReader");
+                var removedCliSilentProxy       = ms.Remove("CliSilentProxy");
+                var removedNotifier             = ms.Remove("Notifier");
+                var removedComplianceKit    = ms.Remove("ComplianceKit");
+                if (removedRowster)              { modified = true; Log.Information("[{Label}] Removed Rowster", label); }
+                if (removedFReader)              { modified = true; Log.Information("[{Label}] Removed FReader", label); }
+                if (removedCliSilentProxy)       { modified = true; Log.Information("[{Label}] Removed CliSilentProxy", label); }
+                if (removedNotifier)             { modified = true; Log.Information("[{Label}] Removed Notifier", label); }
+                if (removedComplianceKit)    { modified = true; Log.Information("[{Label}] Removed ComplianceKit", label); }
+                if (!removedRowster && !removedFReader && !removedCliSilentProxy && !removedNotifier && !removedComplianceKit)
                     Log.Information("[{Label}] No MCP server entries found", label);
 
                 if (ms.Count == 0)
@@ -225,6 +233,23 @@ static void Run(string[] args)
                 };
                 modified = true;
                 Log.Information("[{Label}] Registered Notifier: {Path}", label, notifierPath);
+            }
+
+            if (regComplianceKit && complianceOfficerPath != null)
+            {
+                var entry = new JsonObject
+                {
+                    ["command"] = complianceOfficerPath,
+                    ["args"] = new JsonArray("--mcp"),
+                    ["_description"] = "Code quality audit MCP server — enforces DRY, SRP, naming conventions, testability, security, and 12 other universal standards. Language-agnostic heuristic analysis."
+                };
+                if (complianceOfficerStandards != null)
+                {
+                    entry["args"] = new JsonArray("--mcp", "--standards-path", complianceOfficerStandards);
+                }
+                ms["ComplianceKit"] = entry;
+                modified = true;
+                Log.Information("[{Label}] Registered ComplianceKit: {Path}", label, complianceOfficerPath);
             }
 
         }
@@ -338,15 +363,17 @@ static void Run(string[] args)
         {
             if (root.TryGetPropertyValue("mcp", out var node) && node is JsonObject ms)
             {
-                var removedRowster           = ms.Remove("Rowster");
-                var removedFReader           = ms.Remove("FReader");
-                var removedCliSilentProxy    = ms.Remove("CliSilentProxy");
-                var removedNotifier2          = ms.Remove("Notifier");
-                if (removedRowster)           { modified = true; Log.Information("[{Label}] Removed Rowster", label); }
-                if (removedFReader)           { modified = true; Log.Information("[{Label}] Removed FReader", label); }
-                if (removedCliSilentProxy)    { modified = true; Log.Information("[{Label}] Removed CliSilentProxy", label); }
-                if (removedNotifier2)          { modified = true; Log.Information("[{Label}] Removed Notifier", label); }
-                if (!removedRowster && !removedFReader && !removedCliSilentProxy && !removedNotifier2)
+                var removedRowster              = ms.Remove("Rowster");
+                var removedFReader              = ms.Remove("FReader");
+                var removedCliSilentProxy       = ms.Remove("CliSilentProxy");
+                var removedNotifier2             = ms.Remove("Notifier");
+                var removedComplianceKit2    = ms.Remove("ComplianceKit");
+                if (removedRowster)              { modified = true; Log.Information("[{Label}] Removed Rowster", label); }
+                if (removedFReader)              { modified = true; Log.Information("[{Label}] Removed FReader", label); }
+                if (removedCliSilentProxy)       { modified = true; Log.Information("[{Label}] Removed CliSilentProxy", label); }
+                if (removedNotifier2)             { modified = true; Log.Information("[{Label}] Removed Notifier", label); }
+                if (removedComplianceKit2)    { modified = true; Log.Information("[{Label}] Removed ComplianceKit", label); }
+                if (!removedRowster && !removedFReader && !removedCliSilentProxy && !removedNotifier2 && !removedComplianceKit2)
                     Log.Information("[{Label}] No MCP server entries found", label);
                 if (ms.Count == 0) { root.Remove("mcp"); modified = true; Log.Information("[{Label}] mcp is empty — removed key", label); }
             }
@@ -410,6 +437,23 @@ static void Run(string[] args)
                 };
                 modified = true;
                 Log.Information("[{Label}] Registered Notifier", label);
+            }
+
+            if (regComplianceKit && complianceOfficerPath != null)
+            {
+                var cmdArgs = new JsonArray(complianceOfficerPath, "--mcp");
+                if (complianceOfficerStandards != null)
+                {
+                    cmdArgs = new JsonArray(complianceOfficerPath, "--mcp", "--standards-path", complianceOfficerStandards);
+                }
+                ms["ComplianceKit"] = new JsonObject
+                {
+                    ["type"] = "local",
+                    ["command"] = cmdArgs,
+                    ["enabled"] = true
+                };
+                modified = true;
+                Log.Information("[{Label}] Registered ComplianceKit", label);
             }
 
         }

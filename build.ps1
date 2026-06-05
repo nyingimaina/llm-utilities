@@ -9,7 +9,7 @@ Write-Host "==> Cleaning publish dir..."
 if (Test-Path $publish) { Remove-Item "$publish\*" -Recurse -Force }
 else { New-Item -ItemType Directory -Path $publish | Out-Null }
 
-$projects   = @("Rowster", "FReader", "CliSilentProxy", "Notifier", "McpRegistrar", "NotifierHelper", "ControlPanel")
+$projects   = @("Rowster", "FReader", "CliSilentProxy", "Notifier", "McpRegistrar", "NotifierHelper", "ControlPanel", "ComplianceKit")
 $ridProjects = @{}
 
 foreach ($proj in $projects) {

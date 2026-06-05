@@ -25,6 +25,17 @@ public sealed class RowsterTests
     }
 
     [Fact]
+    public void GetInstructions_Contains_MetaSection()
+    {
+        using var c = Start();
+        var resp = c.GetInstructions();
+        var text = McpTestClient.GetResultText(resp);
+        Assert.NotNull(text);
+        Assert.Contains("_meta", text);
+        Assert.Contains("canNotify", text);
+    }
+
+    [Fact]
     public void ToolsList_IncludesAllRowsterTools()
     {
         using var c = Start();
@@ -89,6 +100,22 @@ public sealed class RowsterTests
 
         // connect() only stores the string — it doesn't actually open a connection.
         Assert.False(McpTestClient.IsError(resp));
+        var text = McpTestClient.GetResultText(resp);
+        Assert.NotNull(text);
+    }
+
+    [Fact]
+    public void Query_WithoutTimeoutMs_UsesDefault()
+    {
+        using var c = Start();
+        var resp = c.CallTool("query", new
+        {
+            sql = "SELECT 1",
+            connection = "Server=127.0.0.1;Port=9999;Uid=invalid;Pwd=invalid;Database=none;ConnectionTimeout=1;",
+        });
+
+        Assert.False(McpTestClient.IsError(resp),
+            "Omitting timeoutMs must not cause a protocol error; base class defaults it.");
         var text = McpTestClient.GetResultText(resp);
         Assert.NotNull(text);
     }

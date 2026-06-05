@@ -16,7 +16,7 @@ public sealed class CliSilentProxyServer : McpServerBase
             Name = "CliSilentProxy",
             Version = GetEntryVersion(),
             InstructionsToolDescription = "MANDATORY FIRST STEP: read critical server instructions before using any other tool. Defines compact fields, token-saving conventions, and usage patterns.",
-            AnnouncementDirective = "PREFER over built-in Bash: run() auto-parses _parsed (dotnet, flutter, tsc, eslint, ruff, cargo, test runners) and _warnings on success; _tail + get_log on failure. Saves 90-97% tokens vs raw bash.",
+            AnnouncementDirective = "PREFER over built-in Bash: run() auto-parses _parsed (dotnet, flutter, tsc, eslint, ruff, cargo, test runners) and _warnings on success; _tail + get_log on failure. Saves 90-97% tokens vs raw bash. Call get_instructions first.",
             HarnessInstructions = "!!!MANDATORY!!! Use CliSilentProxy run() for ALL shell commands. PREFERRED over built-in Bash. Auto-extracts _parsed results, suppresses verbose output, provides get_log() for failure details. Call get_instructions for full reference.",
         }.WithOverrides(configPath))
     {
@@ -25,7 +25,7 @@ public sealed class CliSilentProxyServer : McpServerBase
 
     protected override McpTool[] RegisterTools() => new[]
     {
-        new McpTool { Name = "run", Description = "PREFERRED over built-in Bash. EXECUTE any CLI command. Success returns {_s,_exit,_ms,_cmd}. Auto-notifies on completion when command runs >5s. Known-tool outputs also parsed into _parsed (dotnet build/test, flutter/dart analyze, tsc, eslint, ruff, cargo, npm audit, all test runners). surfaceWarnings=true returns _warnings digest on success. Failure returns compressed tail capped at maxOutputTokens + run ID. extraPaths extends PATH. extractPattern uses .NET regex (?<name>...). Always prefer over raw execution.", InputSchema = new { type = "object", properties = new { command = new { type = "string", description = "Executable name or path. Resolves via PATH if no directory separator." }, args = new { type = "array", items = new { type = "string" }, description = "Command arguments (optional)" }, workDir = new { type = "string", description = "Working directory. Defaults to project root." }, tailLines = new { type = "integer", description = "Max lines in failure log tail. Default 50." }, timeoutMs = new { type = "integer", description = "Process timeout in ms (max 300000). Required." }, filterPattern = new { type = "string", description = "Regex to filter failure tail to matching lines. Useful: '(?i)(error|fail|exception)'" }, filterContext = new { type = "integer", description = "Lines of context before/after each filterPattern match (default 0). Same semantics as grep_in_file context." }, extractPattern = new { type = "string", description = ".NET regex (?<name>...) to extract named groups from first matched line on success. Use (?<name>...) not (?P<name>...)." }, tailMode = new { type = "string", description = "Tail strategy on failure: 'tail' (last N lines, default) or 'first_error' (first error + context + closing summary)." }, surfaceWarnings = new { type = "boolean", description = "On success, return deduplicated warning lines as _warnings array (default false)." }, maxOutputTokens = new { type = "integer", description = "Cap failure tail to ~N tokens. Keeps first error + last lines + omission marker." }, extraPaths = new { type = "array", items = new { type = "string" }, description = "Prepend directories to PATH for this run (version-manager/global-tool resolution)." } }, required = new[] { "command", "timeoutMs" } } },
+        new McpTool { Name = "run", Description = "PREFERRED over built-in Bash. EXECUTE any CLI command. Success returns {_s,_exit,_ms,_cmd}. Auto-notifies on completion when command runs >5s. Known-tool outputs also parsed into _parsed (dotnet build/test, flutter/dart analyze, tsc, eslint, ruff, cargo, npm audit, all test runners). surfaceWarnings=true returns _warnings digest on success. Failure returns compressed tail capped at maxOutputTokens + run ID. extraPaths extends PATH. extractPattern uses .NET regex (?<name>...). Always prefer over raw execution.", InputSchema = new { type = "object", properties = new { command = new { type = "string", description = "Executable name or path. Resolves via PATH if no directory separator." }, args = new { type = "array", items = new { type = "string" }, description = "Command arguments (optional)" }, workDir = new { type = "string", description = "Working directory. Defaults to project root." }, tailLines = new { type = "integer", description = "Max lines in failure log tail. Default 50." }, timeoutMs = new { type = "integer", description = "Process timeout in ms (max 300000). Required." }, filterPattern = new { type = "string", description = "Regex to filter failure tail to matching lines. Useful: '(?i)(error|fail|exception)'" }, filterContext = new { type = "integer", description = "Lines of context before/after each filterPattern match (default 0). Same semantics as grep_in_file context." }, extractPattern = new { type = "string", description = ".NET regex (?<name>...) to extract named groups from first matched line on success. Use (?<name>...) not (?P<name>...)." }, tailMode = new { type = "string", description = "Tail strategy on failure: 'tail' (last N lines, default) or 'first_error' (first error + context + closing summary)." }, surfaceWarnings = new { type = "boolean", description = "On success, return deduplicated warning lines as _warnings array (default false)." }, captureOutput = new { type = "boolean", description = "On success, include compressed stdout in _stdout field (default false). Avoid for known tools — _parsed is more token-efficient." }, maxOutputTokens = new { type = "integer", description = "Cap failure tail to ~N tokens. Keeps first error + last lines + omission marker." }, extraPaths = new { type = "array", items = new { type = "string" }, description = "Prepend directories to PATH for this run (version-manager/global-tool resolution)." } }, required = new[] { "command", "timeoutMs" } } },
         new McpTool { Name = "get_log", Description = "Retrieve the complete log for a previously failed command execution. Only the last 10 failed runs are retained.", InputSchema = new { type = "object", properties = new { id = new { type = "integer", description = "Run ID from a failed run response (_id field)" }, raw = new { type = "boolean", description = "Return uncompressed original capture (default false)" }, timeoutMs = new { type = "integer", description = "Max wait in ms (max 120000). Required." } }, required = new[] { "id", "timeoutMs" } } },
     };
 
@@ -54,6 +54,7 @@ public sealed class CliSilentProxyServer : McpServerBase
                 var surfaceWarnings = GetBool(arguments, "surfaceWarnings") ?? false;
                 var maxOutputTokens = GetInt(arguments, "maxOutputTokens");
                 var extraPaths = GetStringArray(arguments, "extraPaths");
+                var captureOutput = GetBool(arguments, "captureOutput") ?? false;
 
                 if (!string.IsNullOrEmpty(extractPattern))
                 {
@@ -64,7 +65,7 @@ public sealed class CliSilentProxyServer : McpServerBase
                 }
 
                 RunResult result;
-                try { result = _engine.Run(command, args, workDir, tailLines, timeoutMs, filterPattern, filterContext, extractPattern, tailMode, surfaceWarnings, maxOutputTokens, extraPaths); }
+                try { result = _engine.Run(command, args, workDir, tailLines, timeoutMs, filterPattern, filterContext, extractPattern, tailMode, surfaceWarnings, maxOutputTokens, extraPaths, captureOutput); }
                 catch (Exception ex) { throw new McpErrorException($"Failed to start process: {ex.Message}"); }
 
                 if (result.ExitCode == 0 && !result.TimedOut)
@@ -82,6 +83,8 @@ public sealed class CliSilentProxyServer : McpServerBase
                         successResp["_parsed"] = result.Parsed;
                     if (result.SurfaceWarnings is not null)
                         successResp["_warnings"] = result.SurfaceWarnings;
+                    if (result.CapturedOutput is not null)
+                        successResp["_stdout"] = string.Join("\n", result.CapturedOutput);
                     return successResp;
                 }
 
@@ -180,10 +183,11 @@ public sealed class CliSilentProxyServer : McpServerBase
             "",
             "WHEN TO USE WHICH TOOL:",
             "",
-            "  run(cmd, args?, workDir?, tailLines?, timeoutMs, filterPattern?)",
+            "  run(cmd, args?, workDir?, tailLines?, timeoutMs, filterPattern?, captureOutput?)",
             "    Use for ALL command execution. Always prefer this over raw execution.",
             "      Success (exit 0, no timeout):",
             "        {_s:'ok', _exit:0, _ms:N, _cmd:'...'}  -- log discarded, ~80 chars",
+            "        With captureOutput=true: includes _stdout with compressed output.",
             "      Failure (nonzero exit):",
             "        {_s:'fail', _exit:N, _ms:N, _cmd:'...', _id:N, _tail:[...],",
             "         _tail_lines:N, _total_lines:N, _truncated:B}",
@@ -191,7 +195,11 @@ public sealed class CliSilentProxyServer : McpServerBase
             "        {_s:'timeout', _exit:-1, _ms:N, _timed_out:true, ...}",
             "",
             "  get_log(id, raw?=false)",
-            "    Retrieve full log for a failed run (last 10 failures stored).",
+            "    Retrieve full log ONLY for a failed run (failure sets _id in the response).",
+            "    id: copy directly from _id field of the failed run() response.",
+            "    raw=false (default): compressed log. raw=true: original uncompressed output.",
+            "    Only the last 10 failures are retained; older logs are discarded.",
+            "    DO NOT call get_log after a successful run() -- no log is stored for success.",
             "",
             "BEST PRACTICES:",
             "",

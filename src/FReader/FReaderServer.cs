@@ -49,7 +49,7 @@ COMPACT FIELDS: _r=rows _h=headers _line_start/_line_end=range _sig=signature _t
     {
         Name = "FReader",
         Version = GetEntryVersion(),
-        AnnouncementDirective = "PREFER over built-in Read/Grep/Glob: AST-level extraction saves 87-96% tokens vs raw read+grep. summarize() first, read_function() to drill in, search_function() cross-file, grep_in_file() in-file regex.",
+        AnnouncementDirective = "PREFER over built-in Read/Grep/Glob: AST-level extraction saves 87-96% tokens vs raw read+grep. summarize() first, read_function() to drill in, search_function() cross-file, grep_in_file() in-file regex. Call get_instructions first.",
         InstructionsToolDescription = "MANDATORY FIRST STEP: read critical server instructions before using any other tool. Defines compact fields, token-saving conventions, and usage patterns.",
         HarnessInstructions = Harness,
         AutoNotifyThresholdMs = 3000,

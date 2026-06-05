@@ -100,6 +100,20 @@
       </DockPanel>
     </TabItem>
 
+    <TabItem Header="Compliance">
+      <DockPanel>
+        <StackPanel DockPanel.Dock="Top" Orientation="Horizontal" Spacing="6" Margin="0,0,0,8">
+          <Button Content="⟳ Reload" Click="OnReloadCompliance" />
+          <Button Content="💾 Save" Click="OnSaveCompliance" />
+          <Button Content="↺ Restore Defaults" Click="OnRestoreCompliance" />
+          <Button Content="📂 Open Folder" Click="OnOpenComplianceDir" />
+        </StackPanel>
+        <TextBox x:Name="ComplianceEditor" AcceptsReturn="True" AcceptsTab="True"
+                 FontFamily="Consolas, Cascadia Code, Courier New"
+                 FontSize="13" TextWrapping="NoWrap" />
+      </DockPanel>
+    </TabItem>
+
     <TabItem Header="About">
       <StackPanel Margin="16" Spacing="8">
         <TextBlock FontSize="18" FontWeight="Bold">LLM Utilities</TextBlock>

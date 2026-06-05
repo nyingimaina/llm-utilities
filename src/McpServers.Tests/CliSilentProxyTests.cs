@@ -115,6 +115,25 @@ public sealed class CliSilentProxyTests
         Assert.Contains("not found", text, StringComparison.OrdinalIgnoreCase);
     }
 
+    [Fact]
+    public void Run_WithCaptureOutput_ReturnsStdout()
+    {
+        using var c = Start();
+        var resp = c.CallTool("run", new
+        {
+            command = "cmd",
+            args    = new[] { "/c", "echo", "hello-from-capture" },
+            timeoutMs = 10_000,
+            captureOutput = true,
+        });
+
+        Assert.False(McpTestClient.IsError(resp));
+        var text = McpTestClient.GetResultText(resp);
+        Assert.NotNull(text);
+        Assert.Contains("_stdout", text);
+        Assert.Contains("hello-from-capture", text);
+    }
+
     // ── concurrent safety ─────────────────────────────────────────────────────
 
     [Fact]

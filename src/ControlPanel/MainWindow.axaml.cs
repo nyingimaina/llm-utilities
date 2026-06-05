@@ -195,6 +195,56 @@ public partial class MainWindow : Window
 
     void OnRefreshRegistration(object? sender, RoutedEventArgs e) => LoadRegistrations();
 
+    // ── Compliance Tab ────────────────────────────────────────────────────────
+
+    static string ComplianceDefaultPath =>
+        Path.Combine(AppDir, "code-standards.default.md");
+
+    static string ComplianceEditablePath =>
+        Path.Combine(AppDir, "code-standards.md");
+
+    void LoadComplianceRules()
+    {
+        if (!File.Exists(ComplianceEditablePath))
+        {
+            if (File.Exists(ComplianceDefaultPath))
+                File.Copy(ComplianceDefaultPath, ComplianceEditablePath, overwrite: false);
+        }
+
+        ComplianceEditor.Text = File.Exists(ComplianceEditablePath)
+            ? File.ReadAllText(ComplianceEditablePath)
+            : "// No compliance rules file found.\n// The installed default would be at:\n// " + ComplianceDefaultPath;
+    }
+
+    async void OnSaveCompliance(object? sender, RoutedEventArgs e)
+    {
+        try
+        {
+            File.WriteAllText(ComplianceEditablePath, ComplianceEditor.Text);
+            await ShowMessage("Compliance rules saved.");
+        }
+        catch (Exception ex)
+        {
+            await ShowMessage($"Save failed: {ex.Message}");
+        }
+    }
+
+    void OnReloadCompliance(object? sender, RoutedEventArgs e) => LoadComplianceRules();
+
+    async void OnRestoreCompliance(object? sender, RoutedEventArgs e)
+    {
+        if (!File.Exists(ComplianceDefaultPath))
+        {
+            await ShowMessage("Default file not found: " + ComplianceDefaultPath);
+            return;
+        }
+        File.Copy(ComplianceDefaultPath, ComplianceEditablePath, overwrite: true);
+        LoadComplianceRules();
+        await ShowMessage("Defaults restored from code-standards.default.md");
+    }
+
+    void OnOpenComplianceDir(object? sender, RoutedEventArgs e) => OpenFolder(AppDir);
+
     // ── About Tab ────────────────────────────────────────────────────────────
 
     void OnOpenInstallDir(object? sender, RoutedEventArgs e) => OpenFolder(AppDir);
