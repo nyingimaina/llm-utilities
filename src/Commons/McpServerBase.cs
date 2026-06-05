@@ -15,7 +15,7 @@ public abstract class McpServerBase
     TextWriter _output = null!;
     readonly JsonSerializerOptions _json;
     readonly McpServerConfig _config;
-    bool _initialized;
+    volatile bool _initialized;
     CancellationTokenSource? _timeoutCts;
     string? _progressToken;
     bool _canNotify;
@@ -108,7 +108,20 @@ public abstract class McpServerBase
             return;
         }
 
-        if (!_initialized) { Log.Warning("Request {Method} before initialization", req.Method); WriteError(req.Id, -32000, "Not initialized"); return; }
+        // get_instructions is allowed before full initialization — needed to bootstrap client understanding
+        if (!_initialized)
+        {
+            var isGetInstr = req.Method == "tools/call" &&
+                req.Params is JsonElement ip &&
+                ip.TryGetProperty("name", out var inm) &&
+                inm.GetString() == "get_instructions";
+            if (!isGetInstr)
+            {
+                Log.Warning("Request {Method} before initialization", req.Method);
+                WriteError(req.Id, -32000, "Not initialized");
+                return;
+            }
+        }
 
         if (req.Method == "tools/list")
         {
@@ -120,7 +133,9 @@ public abstract class McpServerBase
 
         if (req.Method == "tools/call")
         {
-            var name = req.Params?.GetProperty("name").GetString() ?? "";
+            var name = req.Params is JsonElement cp && cp.TryGetProperty("name", out var cnEl)
+                ? cnEl.GetString() ?? ""
+                : "";
             var arguments = req.Params?.GetProperty("arguments");
             Log.Information("Tool call: {Tool}", name);
 
