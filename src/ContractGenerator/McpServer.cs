@@ -10,8 +10,10 @@ sealed class McpServer : McpServerBase
         {
             Name = "ContractGenerator",
             Version = GetEntryVersion(),
-            InstructionsToolDescription = "Returns compact usage instructions and type-mapping rules for C# to TypeScript interface generation. Cache in context.",
-            AnnouncementDirective = "FEATURE: C# to TypeScript interface generator. generate(cs_path) for single file, generate_batch(cs_paths[]) for batch, sync(cs_path, ts_path) to diff existing TS. Deterministic Roslyn-based conversion — never manually translate C# data types. Supports [JsonPropertyName], [JsonIgnore], collections, dictionaries, nullables.",
+            InstructionsToolDescription = "MANDATORY FIRST STEP: read critical server instructions before using any other tool. Defines type-mapping rules and generation patterns.",
+            AnnouncementDirective = "C# to TypeScript interface generator: generate() for single file, generate_batch() for batch, sync() to diff against existing TS. Deterministic Roslyn-based — never manually translate C# data types.",
+            HarnessInstructions = "Use ContractGenerator for C# to TypeScript interface generation. PREFERRED over manual translation. Supports [JsonPropertyName], [JsonIgnore], collections, dictionaries, nullables.",
+            AutoNotifyThresholdMs = 15000,
         })
     {
     }

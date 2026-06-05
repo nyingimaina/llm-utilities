@@ -11,7 +11,10 @@ sealed class FWriterServer : McpServerBase
     {
         Name = "FWriter",
         Version = GetEntryVersion(),
-        InstructionsToolDescription = "Returns compact instructions for validated code editing. Cache in session context.",
+        AnnouncementDirective = "Validated code editing: edit_function_body() replaces function bodies with AST validation + rollback, edit_block() for non-function content, create_file() with parent dir auto-creation. Prefer over raw edit/write for C#.",
+        HarnessInstructions = "Use FWriter for validated code editing. edit_function_body() for functions (with syntax validation + rollback), edit_block() for config/imports, create_file() for new files. Always prefer edit_function_body over raw Edit for C# changes.",
+        InstructionsToolDescription = "MANDATORY FIRST STEP: read critical server instructions before using any other tool. Defines editing patterns and validation workflows.",
+        AutoNotifyThresholdMs = 30000,
     })
     {
         _providers[".cs"] = new CSharpWriteProvider();

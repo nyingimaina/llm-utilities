@@ -4,6 +4,8 @@ using System.Text.Encodings.Web;
 using System.Text.Json;
 using System.Text.Json.Nodes;
 using System.Text.Json.Serialization;
+using Serilog;
+using System.Runtime.InteropServices;
 
 namespace LLMUtilities.Commons;
 
@@ -20,7 +22,11 @@ public abstract class McpServerBase
     string? _notifyDescription;
     string? _notifySender;
     string? _notifyProject;
+    string? _notifyArgsJson;
+    string? _notifyCwd;
+    string? _notifyTool;
     readonly Queue<long> _notifyTimestamps = new();
+    readonly List<NotificationInfo> _notifyPending = new();
 
     protected CancellationToken CancellationToken => _timeoutCts?.Token ?? System.Threading.CancellationToken.None;
 
@@ -40,13 +46,19 @@ public abstract class McpServerBase
 
     protected virtual bool RequiresTimeoutMs(string toolName) => true;
     protected virtual int? DefaultTimeoutMs(string toolName) => null;
-    protected virtual int? AutoNotifyThresholdMs => null;
+    protected virtual int? AutoNotifyThresholdMs => _config.AutoNotifyThresholdMs;
+    protected virtual Dictionary<string, int>? PerToolAutoNotifyThresholdMs => null;
     protected virtual int NotifyMaxPerWindow => 3;
     protected virtual int NotifyWindowMs => 60_000;
-    protected virtual string GetNotificationContext(string toolName, JsonElement? arguments) => toolName;
+    protected virtual string GetNotificationContext(string toolName, JsonElement? arguments)
+    {
+        var path = GetString(arguments, "path") ?? GetString(arguments, "rootPath");
+        return path is not null ? $"{toolName}({Path.GetFileName(path)})" : toolName;
+    }
 
     public void Run(TextReader input, TextWriter output)
     {
+        Log.Information("Server started: {Name} v{Version}", _config.Name, _config.Version);
         _input = input;
         _output = output;
 
@@ -57,30 +69,34 @@ public abstract class McpServerBase
 
             JsonRpcRequest? req;
             try { req = JsonSerializer.Deserialize<JsonRpcRequest>(line, _json); }
-            catch { WriteError(null, -32700, "Parse error"); continue; }
+            catch { Log.Warning("Parse error on input line"); WriteError(null, -32700, "Parse error"); continue; }
 
             if (req is null) continue;
 
             try { HandleCore(req); }
-            catch (Exception ex) { WriteError(req.Id, -32603, $"Internal error: {ex.Message}"); }
+            catch (Exception ex) { Log.Error(ex, "Unhandled exception handling request {Method}", req.Method); WriteError(req.Id, -32603, $"Internal error: {ex.Message}"); }
         }
+
+        Log.Information("Server shutting down");
     }
 
     void HandleCore(JsonRpcRequest req)
     {
         if (req.Method == "initialize")
         {
+            var caps = new Dictionary<string, object?> { ["tools"] = new { } };
+            var harness = GetHarnessInstructions() ?? _config.HarnessInstructions;
+            if (harness is not null)
+                caps["instructions"] = harness;
+
             var resp = new Dictionary<string, object?>
             {
                 ["protocolVersion"] = "2024-11-05",
-                ["capabilities"] = new { tools = new { } },
+                ["capabilities"] = caps,
                 ["serverInfo"] = new { Name = _config.Name, Version = _config.Version }
             };
 
-            var harness = GetHarnessInstructions();
-            if (harness is not null)
-                resp["instructions"] = harness;
-
+            Log.Information("Client initialized (protocol 2024-11-05)");
             WriteResponse(new JsonRpcResponse(req.Id, resp));
             return;
         }
@@ -88,14 +104,16 @@ public abstract class McpServerBase
         if (req.Method == "notifications/initialized")
         {
             _initialized = true;
+            Log.Information("Received initialized notification");
             return;
         }
 
-        if (!_initialized) { WriteError(req.Id, -32000, "Not initialized"); return; }
+        if (!_initialized) { Log.Warning("Request {Method} before initialization", req.Method); WriteError(req.Id, -32000, "Not initialized"); return; }
 
         if (req.Method == "tools/list")
         {
             var tools = BuildToolsList();
+            Log.Information("Tools listed ({Count} tools)", tools.Length);
             WriteResponse(new JsonRpcResponse(req.Id, new { tools }));
             return;
         }
@@ -104,6 +122,7 @@ public abstract class McpServerBase
         {
             var name = req.Params?.GetProperty("name").GetString() ?? "";
             var arguments = req.Params?.GetProperty("arguments");
+            Log.Information("Tool call: {Tool}", name);
 
             if (name == "get_instructions")
             {
@@ -111,6 +130,7 @@ public abstract class McpServerBase
                 var node = JsonSerializer.SerializeToNode(instructions, _json) as JsonObject;
                 if (node is not null)
                     node["_announce"] = _config.GetAnnouncement();
+                Log.Information("Tool completed: {Tool}", name);
                 WriteResult(req.Id, node ?? instructions);
                 return;
             }
@@ -119,7 +139,15 @@ public abstract class McpServerBase
             _canNotify = false;
             _notifySender = null;
             _notifyProject = null;
+            _notifyArgsJson = null;
+            _notifyCwd = Environment.CurrentDirectory;
+            _notifyTool = name;
             _notifyDescription = GetNotificationContext(name, arguments);
+            if (arguments is not null)
+            {
+                try { _notifyArgsJson = arguments.Value.GetRawText(); }
+                catch { }
+            }
             if (req.Params?.TryGetProperty("_meta", out var meta) == true)
             {
                 if (meta.TryGetProperty("progressToken", out var pt))
@@ -156,19 +184,23 @@ public abstract class McpServerBase
                 var sw = Stopwatch.StartNew();
                 var result = HandleToolCall(name, arguments);
                 sw.Stop();
+                Log.Information("Tool completed: {Tool} in {ElapsedMs}ms", name, sw.ElapsedMilliseconds);
                 result = MaybeInjectShouldNotify(name, result, sw.ElapsedMilliseconds);
                 WriteResult(req.Id, result);
             }
             catch (McpErrorException ex)
             {
+                Log.Warning("Tool returned error: {Tool} - {Message}", name, ex.Message);
                 WriteMcpError(req.Id, ex.Message);
             }
             catch (OperationCanceledException)
             {
+                Log.Warning("Tool timed out: {Tool}", name);
                 WriteMcpError(req.Id, JsonSerializer.Serialize(new { error = "Tool timed out", error_code = "TIMEOUT" }));
             }
             catch (Exception ex)
             {
+                Log.Error(ex, "Tool threw exception: {Tool}", name);
                 WriteError(req.Id, -32603, $"Internal error: {ex.Message}");
             }
             finally
@@ -177,10 +209,14 @@ public abstract class McpServerBase
                 _timeoutCts = null;
                 _progressToken = null;
                 _canNotify = false;
+                _notifyArgsJson = null;
+                _notifyCwd = null;
+                _notifyTool = null;
             }
             return;
         }
 
+        Log.Warning("Method not found: {Method}", req.Method);
         WriteError(req.Id, -32601, $"Method not found: {req.Method}");
     }
 
@@ -201,7 +237,7 @@ public abstract class McpServerBase
 
     protected abstract McpTool[] RegisterTools();
     protected abstract object HandleToolCall(string name, JsonElement? arguments);
-    protected abstract string? GetHarnessInstructions();
+    protected virtual string? GetHarnessInstructions() => _config.HarnessInstructions;
     protected abstract object GetInstructions();
 
     protected void WriteResponse(JsonRpcResponse resp)
@@ -285,16 +321,46 @@ public abstract class McpServerBase
 
     object MaybeInjectShouldNotify(string toolName, object result, long elapsedMs)
     {
-        var threshold = AutoNotifyThresholdMs;
+        var baseThreshold = AutoNotifyThresholdMs;
+        var perTool = PerToolAutoNotifyThresholdMs;
+        int? threshold;
+        if (perTool is not null && perTool.TryGetValue(toolName, out var pt))
+            threshold = pt;
+        else
+            threshold = baseThreshold;
         if (threshold is null || elapsedMs < threshold) return result;
         if (toolName == "get_instructions" || toolName == "get_log") return result;
 
-        // Rate-limit: sliding window
         var maxPerWindow = NotifyMaxPerWindow;
         var windowMs = NotifyWindowMs;
         var now = Stopwatch.GetTimestamp();
         var windowTicks = windowMs * Stopwatch.Frequency / 1000;
 
+        // LLM opted in via _meta._canNotify → inject flag so LLM calls Notifier itself
+        if (_canNotify)
+        {
+            lock (_notifyTimestamps)
+            {
+                while (_notifyTimestamps.Count > 0 && now - _notifyTimestamps.Peek() > windowTicks)
+                    _notifyTimestamps.Dequeue();
+
+                if (JsonSerializer.SerializeToNode(result) is not JsonObject obj)
+                    return result;
+                obj["_shouldNotify"] = true;
+                if (_notifyDescription is not null)
+                    obj["_task"] = _notifyDescription;
+                if (_notifyTimestamps.Count >= maxPerWindow)
+                {
+                    obj["_notify_cooldown_ms"] = 0;
+                    return obj;
+                }
+                _notifyTimestamps.Enqueue(now);
+            }
+            return result;
+        }
+
+        // LLM did NOT opt in → fire notification from the server
+        var info = BuildNotificationInfo(toolName, elapsedMs, result);
         lock (_notifyTimestamps)
         {
             while (_notifyTimestamps.Count > 0 && now - _notifyTimestamps.Peek() > windowTicks)
@@ -302,57 +368,117 @@ public abstract class McpServerBase
 
             if (_notifyTimestamps.Count >= maxPerWindow)
             {
-                // Rate-limited — handle based on opt-in
-                if (_canNotify)
-                {
-                    // LLM opted in: tell it to notify but flag the cooldown
-                    if (JsonSerializer.SerializeToNode(result) is not JsonObject obj)
-                        return result;
-                    obj["_shouldNotify"] = true;
-                    var oldest = _notifyTimestamps.Peek();
-                    var elapsedWinTicks = now - oldest;
-                    var remainingMs = windowMs - (elapsedWinTicks * 1000 / Stopwatch.Frequency);
-                    obj["_notify_cooldown_ms"] = Math.Max(0, remainingMs);
-                    return obj;
-                }
-                // Not opted in: suppress silently
+                // Rate-limited: accumulate for grouped notification
+                lock (_notifyPending)
+                    _notifyPending.Add(info);
                 return result;
             }
 
             _notifyTimestamps.Enqueue(now);
-        }
 
-        // LLM opted in via _meta._canNotify → give it the flag so it calls Notifier itself
-        if (_canNotify)
-        {
-            if (JsonSerializer.SerializeToNode(result) is not JsonObject obj)
-                return result;
-            obj["_shouldNotify"] = true;
-            if (_notifyDescription is not null)
-                obj["_task"] = _notifyDescription;
-            return obj;
-        }
+            // Check for accumulated pending entries
+            List<NotificationInfo>? pending = null;
+            lock (_notifyPending)
+            {
+                if (_notifyPending.Count > 0)
+                {
+                    pending = [.._notifyPending];
+                    _notifyPending.Clear();
+                }
+            }
 
-        // LLM did not opt in → fire cold notification
-        var desc = _notifyDescription ?? _config.Name;
-        var sender = _notifySender;
-        var project = _notifyProject;
-        _ = Task.Run(() => ColdFireNotification(elapsedMs, desc, sender, project));
+            if (pending is not null)
+            {
+                pending.Add(info);
+                var groupInfo = info with
+                {
+                    GroupCount = pending.Count,
+                    Grouped = pending,
+                    Summary = $"{_config.Name}: {pending.Count} tools completed",
+                };
+                NotifierLog.Write(groupInfo);
+                _ = Task.Run(() => ColdFireNotification(groupInfo));
+            }
+            else
+            {
+                NotifierLog.Write(info);
+                _ = Task.Run(() => ColdFireNotification(info));
+            }
+        }
         return result;
     }
 
-    void ColdFireNotification(long elapsedMs, string description, string? sender, string? project)
+    NotificationInfo BuildNotificationInfo(string toolName, long elapsedMs, object result)
+    {
+        bool ok = true;
+        string? error = null;
+        string? resultHint = null;
+        try
+        {
+            var node = JsonSerializer.SerializeToNode(result);
+            if (node is JsonObject obj)
+            {
+                if (obj.TryGetPropertyValue("isError", out var isErrNode) &&
+                    isErrNode is JsonValue isErrVal && isErrVal.TryGetValue<bool>(out var isErr) && isErr)
+                    ok = false;
+
+                if (obj.TryGetPropertyValue("content", out var contentNode) &&
+                    contentNode is JsonArray arr && arr.Count > 0 &&
+                    arr[0] is JsonObject first &&
+                    first.TryGetPropertyValue("text", out var textNode) &&
+                    textNode is JsonValue textVal)
+                {
+                    var raw = textVal.TryGetValue<string>(out var s) ? s ?? "" : "";
+                    if (raw.Length > 0)
+                    {
+                        var firstLine = raw.Split('\n', StringSplitOptions.RemoveEmptyEntries)[0];
+                        resultHint = firstLine.Length > 60 ? firstLine[..60] + "..." : firstLine;
+                    }
+                }
+            }
+        }
+        catch { }
+
+        var cwd = _notifyCwd ?? Environment.CurrentDirectory;
+        var project = _notifyProject;
+        if (project is null)
+        {
+            var parentDir = Path.GetFileName(Path.GetDirectoryName(cwd));
+            var grandparent = Path.GetFileName(cwd);
+            if (grandparent is not null && parentDir is not null)
+                project = $"{parentDir}/{grandparent}";
+            else
+                project = Path.GetFileName(cwd);
+        }
+
+        return new NotificationInfo
+        {
+            Server = _config.Name,
+            LlmClient = ProcessHelper.DetectLlmClient(),
+            Tool = toolName,
+            ArgsJson = _notifyArgsJson,
+            ArgsDisplay = _notifyDescription,
+            Project = project,
+            Cwd = cwd,
+            ElapsedMs = elapsedMs,
+            Ok = ok,
+            Error = error,
+            Timestamp = DateTime.UtcNow,
+            ResultHint = resultHint,
+        };
+    }
+
+    void ColdFireNotification(NotificationInfo info)
     {
         try
         {
             var helperName = OperatingSystem.IsWindows() ? "NotifierHelper.exe" : "NotifierHelper";
             var helper = Path.Combine(AppContext.BaseDirectory, helperName);
-            if (!File.Exists(helper)) return;
-
-            var title = sender is not null ? $"{sender}: {description}" : $"{_config.Name}: {description}";
-            var message = project is not null
-                ? $"{project} | Completed in {elapsedMs / 1000.0:F1}s"
-                : $"Completed in {elapsedMs / 1000.0:F1}s";
+            if (!File.Exists(helper))
+            {
+                Log.Warning("NotifierHelper.exe not found at {Path}; notification for {Server}.{Tool} not shown", helper, info.Server, info.Tool);
+                return;
+            }
 
             var psi = new ProcessStartInfo
             {
@@ -360,22 +486,15 @@ public abstract class McpServerBase
                 UseShellExecute = false,
                 CreateNoWindow = true,
             };
-            psi.ArgumentList.Add("--title");
-            psi.ArgumentList.Add(title);
-            psi.ArgumentList.Add("--message");
-            psi.ArgumentList.Add(message);
-            psi.ArgumentList.Add("--type");
-            psi.ArgumentList.Add("info");
-            psi.ArgumentList.Add("--sender");
-            psi.ArgumentList.Add(sender ?? _config.Name);
-            psi.ArgumentList.Add("--dismiss-after-ms");
-            psi.ArgumentList.Add("8000");
-            psi.ArgumentList.Add("--task");
-            psi.ArgumentList.Add(description);
+            psi.ArgumentList.Add("--data");
+            psi.ArgumentList.Add(info.ToJson());
             using var proc = Process.Start(psi);
             proc?.WaitForExit(3000);
         }
-        catch { /* best-effort */ }
+        catch (Exception ex)
+        {
+            Log.Warning(ex, "Failed to launch NotifierHelper for {Server}.{Tool}", info.Server, info.Tool);
+        }
     }
 
     protected void ReportProgress(double progress, string? message = null, double? total = null)

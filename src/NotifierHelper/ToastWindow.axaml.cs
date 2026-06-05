@@ -2,6 +2,7 @@ using System.Diagnostics;
 using System.Runtime.InteropServices;
 using System.Text;
 using System.Text.Json;
+using System.Text.Json.Serialization;
 using Avalonia;
 using Avalonia.Controls;
 using Avalonia.Media;
@@ -44,6 +45,25 @@ static class WindowActivator
     }
 }
 
+public record NotificationData
+{
+    [JsonPropertyName("server")] public string Server { get; init; } = "";
+    [JsonPropertyName("llmClient")] public string? LlmClient { get; init; }
+    [JsonPropertyName("tool")] public string Tool { get; init; } = "";
+    [JsonPropertyName("argsJson")] public string? ArgsJson { get; init; }
+    [JsonPropertyName("argsDisplay")] public string? ArgsDisplay { get; init; }
+    [JsonPropertyName("project")] public string? Project { get; init; }
+    [JsonPropertyName("cwd")] public string? Cwd { get; init; }
+    [JsonPropertyName("elapsedMs")] public long ElapsedMs { get; init; }
+    [JsonPropertyName("ok")] public bool Ok { get; init; }
+    [JsonPropertyName("error")] public string? Error { get; init; }
+    [JsonPropertyName("timestamp")] public DateTime Timestamp { get; init; }
+    [JsonPropertyName("groupCount")] public int? GroupCount { get; init; }
+    [JsonPropertyName("grouped")] public List<NotificationData>? Grouped { get; init; }
+    [JsonPropertyName("summary")] public string? Summary { get; init; }
+    [JsonPropertyName("resultHint")] public string? ResultHint { get; init; }
+}
+
 public partial class ToastWindow : Window
 {
     static readonly string StateDir = Path.Combine(Path.GetTempPath(), "LLMUtilities");
@@ -53,6 +73,7 @@ public partial class ToastWindow : Window
     static readonly int Gap = 8;
     static int _nextId;
 
+    readonly NotificationData? _data;
     readonly string _type;
     readonly bool _playSound;
     readonly int _dismissMs;
@@ -63,7 +84,17 @@ public partial class ToastWindow : Window
     bool _closing;
     IDisposable? _pollTimer;
 
-    // ── Sound: winmm.dll on Windows ───────────────────────────────────────────
+    static readonly Dictionary<string, Color> LlmColors = new()
+    {
+        ["Claude Code"] = Color.FromArgb(0xFF, 0x8B, 0x5C, 0xF6),
+        ["Gemini CLI"] = Color.FromArgb(0xFF, 0x42, 0x85, 0xF4),
+        ["OpenCode"] = Color.FromArgb(0xFF, 0x10, 0xB9, 0x81),
+        ["Cursor"] = Color.FromArgb(0xFF, 0x1E, 0x29, 0x3B),
+        ["Windsurf"] = Color.FromArgb(0xFF, 0x0E, 0xA5, 0xE9),
+        ["Zed"] = Color.FromArgb(0xFF, 0xEA, 0xB3, 0x08),
+    };
+
+    static readonly Color DefaultAccent = Color.FromArgb(0xFF, 0x6B, 0x72, 0x80);
 
     [DllImport("winmm.dll", SetLastError = true)]
     static extern bool PlaySound(byte[] pszSound, IntPtr hmod, uint fdwSound);
@@ -71,18 +102,72 @@ public partial class ToastWindow : Window
     const uint SND_MEMORY = 0x00000004;
     const uint SND_SYNC = 0x00000000;
 
-    // ── Constructor ───────────────────────────────────────────────────────────
+    // ── Constructors ─────────────────────────────────────────────────────────
 
+    public ToastWindow(string dataJson)
+    {
+        InitializeComponent();
+        NotificationData? parsed = null;
+        try { parsed = JsonSerializer.Deserialize<NotificationData>(dataJson); } catch { }
+
+        if (parsed is not null)
+        {
+            _data = parsed;
+            _type = parsed.Ok ? "info" : "error";
+            _playSound = true;
+            _dismissMs = 8000;
+            _sender = parsed.LlmClient ?? parsed.Server;
+            _myId = Interlocked.Increment(ref _nextId);
+
+            PostInit();
+            RenderFromData();
+        }
+        else
+        {
+            // Fallback: parse unknown data as generic notification
+            _data = null;
+            _type = "info";
+            _playSound = true;
+            _dismissMs = 8000;
+            _sender = "LLM Utilities";
+            _myId = Interlocked.Increment(ref _nextId);
+
+            PostInit();
+            MessageText.Text = "Notification";
+            if (dataJson.Length <= 200)
+                MessageText.Text += "\n" + dataJson;
+        }
+
+        ScheduleDismiss();
+    }
+
+    void ScheduleDismiss()
+    {
+        if (_dismissMs <= 0) return;
+        _ = Task.Run(async () =>
+        {
+            await Task.Delay(_dismissMs);
+            await Dispatcher.UIThread.InvokeAsync(() =>
+            {
+                if (!_closing) Close();
+            });
+        });
+    }
+
+    // Legacy flat args constructor
     public ToastWindow(string title, string message, string type, bool playSound, int dismissMs,
         string? sender = null, string? task = null)
     {
         InitializeComponent();
 
+        _data = null;
         _type = type;
         _playSound = playSound;
         _dismissMs = dismissMs;
         _sender = sender;
         _myId = Interlocked.Increment(ref _nextId);
+
+        PostInit();
 
         if (!string.IsNullOrEmpty(sender))
         {
@@ -91,413 +176,358 @@ public partial class ToastWindow : Window
             ViewMoreText.IsVisible = true;
         }
 
-        TitleText.Text = title;
-        MessageText.Text = message;
+        MessageText.Text = title + "\n" + message;
+    }
 
+    void PostInit()
+    {
         Card.Background = new SolidColorBrush(Color.FromArgb(0xCC, 0x1E, 0x1E, 0x2E));
-
         ConfigureForType();
         _pollTimer = DispatcherTimer.Run(PollReflow, TimeSpan.FromMilliseconds(600));
-
-        PositionChanged += OnScreenChanged;
-        Opened += OnOpened;
+        PositionWindow();
     }
 
-    void OnCardClicked(object? sender, Avalonia.Input.PointerPressedEventArgs e)
-    {
-        if (!string.IsNullOrEmpty(_sender))
-            ActivateSender();
-        _ = Dispatcher.UIThread.InvokeAsync(() => Close());
-    }
+    // ── Render from structured data ─────────────────────────────────────────
 
-    void ActivateSender()
+    void RenderFromData()
     {
-        if (string.IsNullOrEmpty(_sender)) return;
+        if (_data is null) return;
 
-        try
+        var accent = DefaultAccent;
+        if (_data.LlmClient is not null && LlmColors.TryGetValue(_data.LlmClient, out var c))
+            accent = c;
+        AccentStrip.Background = new SolidColorBrush(accent);
+
+        var senderText = _data.LlmClient is not null
+            ? $"{_data.Server}  •  {_data.LlmClient}"
+            : _data.Server;
+        SenderLabel.Text = senderText;
+        SenderLabel.IsVisible = true;
+
+        // Tool line
+        var toolDisplay = _data.ArgsDisplay ?? _data.Tool;
+        if (!string.IsNullOrEmpty(toolDisplay))
         {
-            if (OperatingSystem.IsWindows())
-                WindowActivator.ActivateByTitle(_sender);
-            else if (OperatingSystem.IsMacOS())
-                Process.Start("osascript", $"-e \"tell app \"{_sender}\" to activate\"");
-            else if (OperatingSystem.IsLinux())
-                Process.Start("wmctrl", $"-a \"{_sender}\"");
+            ToolLine.Text = toolDisplay;
+            ToolLine.IsVisible = true;
         }
-        catch { }
+
+        // Project line
+        if (!string.IsNullOrEmpty(_data.Project))
+        {
+            ProjectLine.Text = _data.Project;
+            ProjectLine.IsVisible = true;
+        }
+
+        // Handle grouped vs single
+        if (_data.Grouped is { Count: > 0 })
+        {
+            RenderGrouped();
+        }
+        else
+        {
+            RenderSingle();
+        }
+
+        ViewMoreText.IsVisible = true;
     }
+
+    void RenderGrouped()
+    {
+        if (_data?.Grouped is null) return;
+
+        var elapsed = _data.ElapsedMs / 1000.0;
+        var status = _data.Ok ? "✓" : "✗";
+        var time = elapsed < 60 ? $"{elapsed:F1}s" : $"{elapsed / 60:F1}m";
+        MessageText.Text = $"{_data.Summary ?? $"{_data.Server}: {_data.Grouped.Count} tools"}  ({time})";
+        MessageText.IsVisible = true;
+
+        // Render grouped items
+        foreach (var item in _data.Grouped)
+        {
+            var itemText = item.ArgsDisplay ?? item.Tool;
+            var itemTime = item.ElapsedMs / 1000.0;
+            var itemStatus = item.Ok ? "✓" : "✗";
+            var timeStr = itemTime < 60 ? $"{itemTime:F1}s" : $"{itemTime / 60:F1}m";
+
+            var tb = new TextBlock
+            {
+                Text = $"  {itemStatus} {itemText}  ·  {timeStr}",
+                FontSize = 12,
+                Foreground = new SolidColorBrush(Color.FromArgb(0xBB, 0xFF, 0xFF, 0xFF)),
+                TextTrimming = TextTrimming.CharacterEllipsis,
+                TextWrapping = TextWrapping.NoWrap,
+                Margin = new Thickness(0, 1, 0, 0),
+            };
+
+            if (item.Error is not null)
+                tb.Text += $"  — {item.Error}";
+
+            if (!item.Ok)
+                tb.Foreground = new SolidColorBrush(Color.FromArgb(0xBB, 0xFF, 0x6B, 0x6B));
+
+            GroupedList.Children.Add(tb);
+        }
+
+        GroupedList.IsVisible = true;
+    }
+
+    void RenderSingle()
+    {
+        if (_data is null) return;
+
+        var elapsed = _data.ElapsedMs / 1000.0;
+        var timeStr = elapsed < 60 ? $"{elapsed:F1}s" : $"{elapsed / 60:F1}m";
+        var status = _data.Ok ? '✓' : '✗';
+        var elapsedText = $"{status} {timeStr}";
+
+        if (_data.ResultHint is not null && _data.ResultHint.Length > 0)
+        {
+            var hint = _data.ResultHint;
+            if (hint.Length > 100) hint = hint[..100] + "...";
+            MessageText.Text = $"{elapsedText}  —  {hint}";
+        }
+        else if (_data.Error is not null)
+        {
+            var err = _data.Error.Length > 100 ? _data.Error[..100] + "..." : _data.Error;
+            MessageText.Text = $"{elapsedText}  —  {err}";
+        }
+        else
+        {
+            MessageText.Text = elapsedText;
+        }
+
+        MessageText.IsVisible = true;
+    }
+
+    // ── Sound generation ────────────────────────────────────────────────────
 
     void ConfigureForType()
     {
         if (_type == "error")
         {
-            AccentStrip.Background = new SolidColorBrush(Color.Parse("#FF5252"));
-            IconText.Foreground = new SolidColorBrush(Color.Parse("#FF5252"));
-            IconText.Text = "\u2715";
+            AccentStrip.Background ??= new SolidColorBrush(Color.FromArgb(0xFF, 0xEF, 0x44, 0x44));
         }
         else
         {
-            AccentStrip.Background = new SolidColorBrush(Color.Parse("#4A9EFF"));
-            IconText.Foreground = new SolidColorBrush(Color.Parse("#4CAF50"));
-            IconText.Text = "\u2713";
+            AccentStrip.Background ??= new SolidColorBrush(Color.FromArgb(0xFF, 0x4A, 0x90, 0xD9));
         }
+
+        if (_playSound)
+            PlayNotificationSound(_type);
     }
 
-    // ── Stack state ──────────────────────────────────────────────────────────
-
-    record StackEntry(int Id, int Pid, int Slot, double Height);
-
-    static List<StackEntry> ReadState()
+    void PlayNotificationSound(string type)
     {
         try
         {
-            if (!File.Exists(StatePath)) return [];
-            var text = File.ReadAllText(StatePath);
-            return JsonSerializer.Deserialize<List<StackEntry>>(text) ?? [];
+            int hz1 = type == "error" ? 660 : 880;
+            int ms1 = type == "error" ? 25 : 50;
+            int hz2 = type == "error" ? 440 : 0;
+            int ms2 = type == "error" ? 25 : 0;
+
+            var sampleRate = 44100;
+            var totalSamples = sampleRate * (ms1 + ms2) / 1000;
+            var wav = new byte[44 + totalSamples * 2];
+
+            // WAV header
+            Buffer.BlockCopy(Encoding.ASCII.GetBytes("RIFF"), 0, wav, 0, 4);
+            Buffer.BlockCopy(BitConverter.GetBytes(36 + totalSamples * 2), 0, wav, 4, 4);
+            Buffer.BlockCopy(Encoding.ASCII.GetBytes("WAVE"), 0, wav, 8, 4);
+            Buffer.BlockCopy(Encoding.ASCII.GetBytes("fmt "), 0, wav, 12, 4);
+            Buffer.BlockCopy(BitConverter.GetBytes(16), 0, wav, 16, 4);
+            Buffer.BlockCopy(BitConverter.GetBytes((short)1), 0, wav, 20, 2);
+            Buffer.BlockCopy(BitConverter.GetBytes((short)1), 0, wav, 22, 2);
+            Buffer.BlockCopy(BitConverter.GetBytes(sampleRate), 0, wav, 24, 4);
+            Buffer.BlockCopy(BitConverter.GetBytes(sampleRate * 2), 0, wav, 28, 4);
+            Buffer.BlockCopy(BitConverter.GetBytes((short)2), 0, wav, 32, 2);
+            Buffer.BlockCopy(BitConverter.GetBytes((short)16), 0, wav, 34, 2);
+            Buffer.BlockCopy(Encoding.ASCII.GetBytes("data"), 0, wav, 36, 4);
+            Buffer.BlockCopy(BitConverter.GetBytes(totalSamples * 2), 0, wav, 40, 4);
+
+            var idx = 44;
+            var vol = (int)(short.MaxValue * 0.3);
+            var samples1 = sampleRate * ms1 / 1000;
+            var samples2 = sampleRate * ms2 / 1000;
+
+            for (int i = 0; i < samples1 + samples2; i++)
+            {
+                short sample = 0;
+                if (i < samples1)
+                {
+                    var t = (double)i / sampleRate;
+                    sample = (short)(vol * Math.Sin(2 * Math.PI * hz1 * t));
+                }
+                else if (hz2 > 0)
+                {
+                    var t = (double)(i - samples1) / sampleRate;
+                    sample = (short)(vol * Math.Sin(2 * Math.PI * hz2 * t));
+                }
+                wav[idx++] = (byte)(sample & 0xFF);
+                wav[idx++] = (byte)((sample >> 8) & 0xFF);
+            }
+
+            if (OperatingSystem.IsWindows())
+                PlaySound(wav, IntPtr.Zero, SND_MEMORY | SND_SYNC);
         }
-        catch { return []; }
+        catch { /* best-effort */ }
     }
 
-    static void WriteState(List<StackEntry> entries)
+    // ── Stack positioning ───────────────────────────────────────────────────
+
+    void PositionWindow()
     {
         try
         {
-            Directory.CreateDirectory(StateDir);
-            var tmp = StatePath + ".tmp";
-            File.WriteAllText(tmp, JsonSerializer.Serialize(entries));
-            File.Move(tmp, StatePath, overwrite: true);
+            var screen = Screens.Primary;
+            if (screen is null) return;
+
+            var wa = screen.WorkingArea;
+            var x = wa.Right - 400;
+            var y = wa.Bottom - BottomMargin;
+
+            // Read stack state
+            var slots = ReadSlots();
+            _mySlot = slots.Count;
+
+            foreach (var s in slots)
+            {
+                if (!s.Closed)
+                    y -= (int)(s.Height + Gap);
+            }
+
+        y = Math.Max(wa.Y + 20, y);
+
+            WindowStartupLocation = WindowStartupLocation.Manual;
+            Position = new PixelPoint((int)(x / screen.Scaling), (int)(y / screen.Scaling));
         }
-        catch { }
+        catch { /* best-effort positioning */ }
     }
 
-    static bool IsProcessAlive(int pid)
+    void OnInitializedCore()
     {
-        try { using var p = Process.GetProcessById(pid); return !p.HasExited; }
-        catch { return false; }
+        _myHeight = Bounds.Height;
+        WriteSlot(_myId, _mySlot, _myHeight, false);
+        AnimateIn();
     }
 
-    int ClaimSlot()
+    protected override void OnOpened(EventArgs e)
     {
-        try { StateMutex.WaitOne(); }
-        catch (AbandonedMutexException) { }
-
-        try
-        {
-            var entries = ReadState();
-            entries.RemoveAll(e => !IsProcessAlive(e.Pid));
-            var taken = entries.Select(e => e.Slot).ToHashSet();
-            int slot = 0;
-            while (taken.Contains(slot)) slot++;
-
-            entries.Add(new StackEntry(_myId, Environment.ProcessId, slot, _myHeight));
-            WriteState(entries);
-            return slot;
-        }
-        finally { StateMutex.ReleaseMutex(); }
+        base.OnOpened(e);
+        Dispatcher.UIThread.Post(OnInitializedCore, DispatcherPriority.Background);
     }
 
-    void ReleaseSlot()
+    void AnimateIn()
     {
-        try { StateMutex.WaitOne(); }
-        catch (AbandonedMutexException) { }
-
-        try
-        {
-            var entries = ReadState();
-            entries.RemoveAll(e => e.Id == _myId);
-            var sorted = entries.OrderBy(e => e.Slot).ToList();
-            for (int i = 0; i < sorted.Count; i++)
-                sorted[i] = sorted[i] with { Slot = i };
-            WriteState(sorted);
-        }
-        finally { StateMutex.ReleaseMutex(); }
+        // Simplified: just ensure visible at correct position
+        Opacity = 1;
     }
-
-    static int? GetMySlot(List<StackEntry> entries, int myId) =>
-        entries.FirstOrDefault(e => e.Id == myId)?.Slot;
-
-    // ── Positioning ──────────────────────────────────────────────────────────
-
-    void OnScreenChanged(object? sender, PixelPointEventArgs e)
-    {
-        Reposition(animate: false);
-    }
-
-    void Reposition(bool animate)
-    {
-        var screens = Screens;
-        if (screens is null || screens.ScreenCount == 0) return;
-        var screen = screens.Primary;
-        if (screen is null) return;
-
-        var scaling = screen.Scaling;
-        var bounds = screen.Bounds;
-        var x = (int)((bounds.X + bounds.Width) / scaling - Width - 16);
-        var slot = _mySlot;
-        var y = (int)((bounds.Y + bounds.Height) / scaling - BottomMargin - _myHeight - (_myHeight + Gap) * slot);
-
-        var target = new PixelPoint((int)(x * scaling), (int)(y * scaling));
-
-        if (animate && Position != target)
-            _ = AnimateFall(target);
-        else
-            Position = target;
-    }
-
-    // ── Reflow ───────────────────────────────────────────────────────────────
 
     bool PollReflow()
     {
         if (_closing) return false;
 
-        var entries = ReadState();
-        var slot = GetMySlot(entries, _myId);
+        var slots = ReadSlots();
+        var myIndex = slots.FindIndex(s => s.Id == _myId);
+        if (myIndex < 0) return true;
 
-        if (slot.HasValue && slot.Value != _mySlot)
+        // Recalculate my position
+        var screen = Screens.Primary;
+        if (screen is null) return true;
+
+        var wa = screen.WorkingArea;
+        var x = wa.Right - 400;
+        var y = wa.Bottom - BottomMargin;
+
+        var earlierHeight = 0.0;
+        for (int i = 0; i < myIndex; i++)
         {
-            _mySlot = slot.Value;
-            Reposition(animate: true);
+            if (!slots[i].Closed)
+                earlierHeight += (int)(slots[i].Height + Gap);
         }
-        return !_closing;
-    }
 
-    // ── Lifecycle ────────────────────────────────────────────────────────────
+        y -= (int)earlierHeight;
+        y = Math.Max(wa.Y + 20, y);
 
-    async void OnOpened(object? sender, EventArgs e)
-    {
-        _myHeight = ClientSize.Height;
-        _mySlot = ClaimSlot();
-        Reposition(animate: false);
+        var targetX = (int)(x / screen.Scaling);
+        var targetY = (int)(y / screen.Scaling);
 
-        if (_playSound) PlaySound();
-        await AnimateSlideIn();
+        if (Position.X != targetX || Position.Y != targetY)
+            Position = new PixelPoint(targetX, targetY);
 
-        if (_type == "error")
-            await AnimateShake();
+        // Update my height
+        var currentHeight = Bounds.Height;
+        if (Math.Abs(currentHeight - _myHeight) > 1)
+        {
+            _myHeight = currentHeight;
+            WriteSlot(_myId, _mySlot, currentHeight, false);
+        }
 
-        if (_type != "error")
-            await AnimateCheckmark();
+        return true;
     }
 
     protected override void OnClosing(WindowClosingEventArgs e)
     {
-        if (!_closing && _dismissMs > 0)
-        {
-            _closing = true;
-            e.Cancel = true;
-            _ = AnimateClose();
-        }
+        _closing = true;
+        _pollTimer?.Dispose();
+        WriteSlot(_myId, _mySlot, _myHeight, true);
         base.OnClosing(e);
     }
 
-    // ── Animations ───────────────────────────────────────────────────────────
+    // ── Slot persistence ────────────────────────────────────────────────────
 
-    async Task AnimateSlideIn()
+    record SlotInfo(int Id, int Index, double Height, bool Closed);
+
+    List<SlotInfo> ReadSlots()
     {
-        var transform = this.RenderTransform as TranslateTransform;
-        if (transform is null) return;
-
-        await AnimateProperty(t => transform.X = t, 400, -15, 180);
-        await AnimateProperty(t => transform.X = t, -15, 5, 60);
-        await AnimateProperty(t => transform.X = t, 5, 0, 40);
-    }
-
-    async Task AnimateShake()
-    {
-        var transform = this.RenderTransform as TranslateTransform;
-        if (transform is null) return;
-
-        var origX = transform.X;
-        await AnimateProperty(t => transform.X = t, origX, origX - 10, 40);
-        await AnimateProperty(t => transform.X = t, origX - 10, origX + 8, 40);
-        await AnimateProperty(t => transform.X = t, origX + 8, origX - 5, 30);
-        await AnimateProperty(t => transform.X = t, origX - 5, origX + 4, 30);
-        await AnimateProperty(t => transform.X = t, origX + 4, origX, 20);
-    }
-
-    async Task AnimateCheckmark()
-    {
-        if (IconBox is null) return;
-        await AnimateProperty(t =>
-        {
-            IconBox.Opacity = t;
-            IconBox.RenderTransform = new ScaleTransform(t, t);
-        }, 0, 1, 200);
-    }
-
-    async Task AnimateFall(PixelPoint target)
-    {
-        var startX = Position.X;
-        var startY = Position.Y;
-        var sw = Stopwatch.StartNew();
-        var duration = 300;
-
-        while (sw.ElapsedMilliseconds < duration)
-        {
-            var t = sw.ElapsedMilliseconds / (double)duration;
-            t = 1 - Math.Pow(1 - t, 3);
-            var x = (int)(startX + (target.X - startX) * t);
-            var y = (int)(startY + (target.Y - startY) * t);
-            Position = new PixelPoint(x, y);
-            await Task.Delay(8);
-        }
-        Position = target;
-    }
-
-    async Task AnimateClose()
-    {
-        ReleaseSlot();
-
-        var transform = this.RenderTransform as TranslateTransform;
-        var startY = transform?.Y ?? 0;
-        var sw = Stopwatch.StartNew();
-        var duration = 400;
-
-        while (sw.ElapsedMilliseconds < duration)
-        {
-            var t = sw.ElapsedMilliseconds / (double)duration;
-            t = t * t;
-            Opacity = 1 - t;
-            if (transform is not null)
-                transform.Y = startY - t * 15;
-            await Task.Delay(8);
-        }
-
-        Opacity = 0;
-        Close();
-    }
-
-    static async Task AnimateProperty(Action<double> setter, double from, double to, int durationMs)
-    {
-        var sw = Stopwatch.StartNew();
-        while (sw.ElapsedMilliseconds < durationMs)
-        {
-            var t = sw.ElapsedMilliseconds / (double)durationMs;
-            t = 1 - Math.Pow(1 - t, 3);
-            var value = from + (to - from) * t;
-            setter(value);
-            await Dispatcher.UIThread.InvokeAsync(() => { }, DispatcherPriority.Background);
-            await Task.Delay(8);
-        }
-        setter(to);
-    }
-
-    // ── Sound ────────────────────────────────────────────────────────────────
-
-    void PlaySound()
-    {
-        if (!_playSound) return;
-        var samples = _type == "error" ? GenerateErrorSound() : GenerateInfoSound();
-        var wav = BuildWav(samples);
-
-        if (OperatingSystem.IsWindows())
-        {
-            _ = Task.Run(() =>
-            {
-                try { PlaySound(wav, IntPtr.Zero, SND_MEMORY | SND_SYNC); }
-                catch { }
-            });
-        }
-        else
-        {
-            PlayViaFile(wav);
-        }
-    }
-
-    void PlayViaFile(byte[] wav)
-    {
-        var tempPath = Path.Combine(Path.GetTempPath(), $"notifier_{Guid.NewGuid():N}.wav");
         try
         {
-            File.WriteAllBytes(tempPath, wav);
-            if (OperatingSystem.IsMacOS())
+            StateMutex.WaitOne(3000);
+            try
             {
-                var psi = new ProcessStartInfo
+                if (File.Exists(StatePath))
                 {
-                    FileName = "afplay",
-                    Arguments = $"\"{tempPath}\"",
-                    UseShellExecute = false,
-                    CreateNoWindow = true,
-                };
-                using var proc = Process.Start(psi);
-                proc?.WaitForExit(2000);
+                    var json = File.ReadAllText(StatePath);
+                    return JsonSerializer.Deserialize<List<SlotInfo>>(json) ?? [];
+                }
             }
-            else if (OperatingSystem.IsLinux())
+            finally { StateMutex.ReleaseMutex(); }
+        }
+        catch { }
+        return [];
+    }
+
+    void WriteSlot(int id, int slot, double height, bool closed)
+    {
+        try
+        {
+            StateMutex.WaitOne(3000);
+            try
             {
-                var psi = new ProcessStartInfo
-                {
-                    FileName = "aplay",
-                    Arguments = $"\"{tempPath}\"",
-                    UseShellExecute = false,
-                    CreateNoWindow = true,
-                };
-                using var proc = Process.Start(psi);
-                proc?.WaitForExit(2000);
+                Directory.CreateDirectory(StateDir);
+                var slots = File.Exists(StatePath)
+                    ? JsonSerializer.Deserialize<List<SlotInfo>>(File.ReadAllText(StatePath)) ?? []
+                    : [];
+                slots.RemoveAll(s => s.Id == id);
+                if (!closed)
+                    slots.Add(new SlotInfo(id, slot, height, false));
+                File.WriteAllText(StatePath, JsonSerializer.Serialize(slots));
             }
+            finally { StateMutex.ReleaseMutex(); }
         }
-        finally
-        {
-            try { File.Delete(tempPath); } catch { }
-        }
+        catch { }
     }
 
-    static short[] GenerateInfoSound()
+    // ── Click handler ────────────────────────────────────────────────────────
+
+    void OnCardClicked(object? sender, Avalonia.Input.PointerPressedEventArgs e)
     {
-        var sampleRate = 44100;
-        var duration = 0.05;
-        var count = (int)(sampleRate * duration);
-        var result = new short[count];
-        for (int i = 0; i < count; i++)
-        {
-            var t = i / (double)sampleRate;
-            var envelope = 1.0 - (i / (double)count);
-            result[i] = (short)(short.MaxValue * 0.3 * Math.Sin(2 * Math.PI * 880 * t) * envelope);
-        }
-        return result;
-    }
+        // Try to activate sender window
+        if (_data?.LlmClient is not null)
+            WindowActivator.ActivateByTitle(_data.LlmClient);
+        else if (_sender is not null)
+            WindowActivator.ActivateByTitle(_sender);
 
-    static short[] GenerateErrorSound()
-    {
-        var sampleRate = 44100;
-        var tickDuration = 0.025;
-        var count = (int)(sampleRate * tickDuration * 2);
-        var result = new short[count];
-        for (int i = 0; i < count; i++)
-        {
-            var t = i / (double)sampleRate;
-            var envelope = 1.0 - (i / (double)count);
-            var freq = i < count / 2 ? 660.0 : 440.0;
-            result[i] = (short)(short.MaxValue * 0.25 * Math.Sin(2 * Math.PI * freq * t) * envelope);
-        }
-        return result;
-    }
-
-    static byte[] BuildWav(short[] samples)
-    {
-        var sampleRate = 44100;
-        var bitsPerSample = 16;
-        var channels = 1;
-        var dataSize = samples.Length * 2;
-        var wav = new byte[44 + dataSize];
-
-        var fmt = bitsPerSample / 8;
-        var byteRate = sampleRate * channels * fmt;
-        var blockAlign = channels * fmt;
-
-        wav[0] = (byte)'R'; wav[1] = (byte)'I'; wav[2] = (byte)'F'; wav[3] = (byte)'F';
-        BitConverter.GetBytes(36 + dataSize).CopyTo(wav, 4);
-        wav[8] = (byte)'W'; wav[9] = (byte)'A'; wav[10] = (byte)'V'; wav[11] = (byte)'E';
-        wav[12] = (byte)'f'; wav[13] = (byte)'m'; wav[14] = (byte)'t'; wav[15] = (byte)' ';
-        BitConverter.GetBytes(16).CopyTo(wav, 16);
-        BitConverter.GetBytes((short)1).CopyTo(wav, 20);
-        BitConverter.GetBytes((short)channels).CopyTo(wav, 22);
-        BitConverter.GetBytes(sampleRate).CopyTo(wav, 24);
-        BitConverter.GetBytes(byteRate).CopyTo(wav, 28);
-        BitConverter.GetBytes((short)blockAlign).CopyTo(wav, 32);
-        BitConverter.GetBytes((short)bitsPerSample).CopyTo(wav, 34);
-        wav[36] = (byte)'d'; wav[37] = (byte)'a'; wav[38] = (byte)'t'; wav[39] = (byte)'a';
-        BitConverter.GetBytes(dataSize).CopyTo(wav, 40);
-
-        Buffer.BlockCopy(samples, 0, wav, 44, dataSize);
-        return wav;
+        _ = Dispatcher.UIThread.InvokeAsync(() => Close());
     }
 }

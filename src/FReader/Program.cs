@@ -1,5 +1,7 @@
 using System.Text.Json;
+using LLMUtilities.Commons;
 using FReader;
+using Serilog;
 
 var path = "";
 int? lineStart = null, lineEnd = null, truncate = null;
@@ -8,6 +10,8 @@ var pretty = false;
 var mcpMode = false;
 var listFunctions = false;
 var extractFunction = "";
+string? configPath = null;
+string? logDir = null;
 
 for (int i = 0; i < args.Length; i++)
 {
@@ -22,13 +26,30 @@ for (int i = 0; i < args.Length; i++)
         case "--pretty":    pretty    = true; break;
         case "--list-functions": listFunctions = true; break;
         case "--extract-function" when i + 1 < args.Length: extractFunction = args[++i]; break;
+        case "--config-path" when i + 1 < args.Length: configPath = args[++i]; break;
+        case "--log-dir" when i + 1 < args.Length: logDir = args[++i]; break;
     }
 }
 
 if (mcpMode)
 {
-    using var server = new FReaderServer();
-    server.Run(Console.In, Console.Out);
+    logDir ??= ConfigPaths.LogDir("FReader");
+    Directory.CreateDirectory(logDir);
+        Log.Logger = new LoggerConfiguration()
+            .MinimumLevel.Information()
+            .WriteTo.File(
+                Path.Combine(logDir, "FReader.log"),
+                outputTemplate: "{Timestamp:yyyy-MM-dd HH:mm:ss} [{Level:u3}] {Message:lj}{NewLine}{Exception}")
+            .CreateLogger();
+
+    try
+    {
+        configPath ??= ConfigPaths.ConfigFile("FReader");
+        using var server = new FReaderServer(configPath);
+        server.Run(Console.In, Console.Out);
+    }
+    catch (Exception ex) { Log.Fatal(ex, "Unhandled exception"); }
+    finally { Log.CloseAndFlush(); }
     return 0;
 }
 

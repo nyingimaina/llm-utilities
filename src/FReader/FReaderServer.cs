@@ -7,6 +7,19 @@ sealed class FReaderServer : McpServerBase, IDisposable
 {
     protected override bool RequiresTimeoutMs(string toolName) => toolName != "record_benchmark";
     protected override int? DefaultTimeoutMs(string toolName) => toolName == "grep" || toolName == "search_function" ? 60000 : 30000;
+    protected override Dictionary<string, int>? PerToolAutoNotifyThresholdMs => new()
+    {
+        ["read"] = 2000,
+        ["grep"] = 5000,
+        ["search_function"] = 5000,
+        ["grep_in_file"] = 2000,
+        ["summarize"] = 3000,
+        ["read_function"] = 2000,
+        ["read_functions"] = 2000,
+        ["list_functions"] = 2000,
+        ["info"] = 1000,
+        ["extract_function"] = 2000,
+    };
     public void Dispose() => ProviderFactory.Shutdown();
     const string Harness = """
 === FReader -- mandatory harness ===
@@ -32,13 +45,15 @@ TOOL SELECTION (in priority order):
 COMPACT FIELDS: _r=rows _h=headers _line_start/_line_end=range _sig=signature _text=text output
 """;
 
-    public FReaderServer() : base(new McpServerConfig
+    public FReaderServer(string? configPath = null) : base(new McpServerConfig
     {
         Name = "FReader",
         Version = GetEntryVersion(),
-        InstructionsToolDescription = "Returns compact field-name mapping and token-saving conventions. Cache it in context.",
+        AnnouncementDirective = "PREFER over built-in Read/Grep/Glob: AST-level extraction saves 87-96% tokens vs raw read+grep. summarize() first, read_function() to drill in, search_function() cross-file, grep_in_file() in-file regex.",
+        InstructionsToolDescription = "MANDATORY FIRST STEP: read critical server instructions before using any other tool. Defines compact fields, token-saving conventions, and usage patterns.",
         HarnessInstructions = Harness,
-    })
+        AutoNotifyThresholdMs = 3000,
+    }.WithOverrides(configPath))
     {
     }
 
@@ -70,7 +85,7 @@ COMPACT FIELDS: _r=rows _h=headers _line_start/_line_end=range _sig=signature _t
             new McpTool
             {
                 Name = "info",
-                Description = "File metadata (size, lines, encoding).",
+                Description = "PREFERRED over built-in Read. File metadata (size, lines, encoding).",
                 InputSchema = new
                 {
                     type = "object",
@@ -173,7 +188,7 @@ COMPACT FIELDS: _r=rows _h=headers _line_start/_line_end=range _sig=signature _t
             new McpTool
             {
                 Name = "grep_in_file",
-                Description = "Regex search within a file. Merges overlapping context windows.",
+                Description = "PREFERRED over built-in Grep for known files. Regex search within a file. Merges overlapping context windows.",
                 InputSchema = new
                 {
                     type = "object",
@@ -192,7 +207,7 @@ COMPACT FIELDS: _r=rows _h=headers _line_start/_line_end=range _sig=signature _t
             new McpTool
             {
                 Name = "search_function",
-                Description = "Search directory tree for named function. Regex+Roslyn. Excludes obj/bin by default. Supports progress pings.",
+                Description = "PREFERRED over glob+grep. Search directory tree for named function. Regex+Roslyn. Excludes obj/bin by default. Supports progress pings.",
                 InputSchema = new
                 {
                     type = "object",
@@ -277,7 +292,7 @@ COMPACT FIELDS: _r=rows _h=headers _line_start/_line_end=range _sig=signature _t
         var normalizeIndent = GetBool(arguments, "normalizeIndent") ?? false;
         var useAliases = GetBool(arguments, "aliases") ?? false;
 
-        var result = LineEngine.ReadLines(path, lineStart, lineEnd, truncate, stripImports, normalizeIndent);
+        var result = LineEngine.ReadLines(path, lineStart, lineEnd, truncate, stripImports, normalizeIndent, CancellationToken);
         if (result.Error is not null)
             throw new McpErrorException(JsonSerializer.Serialize(result.Error));
 
@@ -298,7 +313,7 @@ COMPACT FIELDS: _r=rows _h=headers _line_start/_line_end=range _sig=signature _t
     object HandleInfo(JsonElement? arguments)
     {
         var path = GetString(arguments, "path") ?? "";
-        var result = LineEngine.GetInfo(path);
+        var result = LineEngine.GetInfo(path, CancellationToken);
         if (result is Dictionary<string, object?> err && err.ContainsKey("error"))
             throw new McpErrorException(JsonSerializer.Serialize(result));
         return result;
@@ -309,7 +324,14 @@ COMPACT FIELDS: _r=rows _h=headers _line_start/_line_end=range _sig=signature _t
         var path = GetString(arguments, "path") ?? "";
         var includeSystem = GetBool(arguments, "includeSystem") ?? false;
 
-        var funcs = ProviderFactory.ListFunctions(path, includeSystem);
+        if (!ProviderFactory.HasProvider(path))
+            throw new McpErrorException(JsonSerializer.Serialize(FReaderError.Make(
+                $"FReader has no AST provider for {Path.GetExtension(path)} files",
+                FReaderError.UNSUPPORTED_LANGUAGE,
+                ("_supported_extensions", ProviderFactory.SupportedExtensions),
+                ("_hint", "Use read() for plain line-based reading of this file, or grep_in_file for regex search"))));
+
+        var funcs = ProviderFactory.ListFunctions(path, includeSystem, CancellationToken);
         var rows = funcs.Select(f => new object[] { f.Name, f.Signature, f.LineStart, f.LineEnd }).ToArray();
         return new
         {
@@ -325,12 +347,19 @@ COMPACT FIELDS: _r=rows _h=headers _line_start/_line_end=range _sig=signature _t
         var parameterTypes = GetStringArray(arguments, "parameterTypes");
         var className = GetString(arguments, "className");
 
-        var funcs = ProviderFactory.GetFunctions(path, funcName, parameterTypes);
+        if (!ProviderFactory.HasProvider(path))
+            throw new McpErrorException(JsonSerializer.Serialize(FReaderError.Make(
+                $"FReader has no AST provider for {Path.GetExtension(path)} files",
+                FReaderError.UNSUPPORTED_LANGUAGE,
+                ("_supported_extensions", ProviderFactory.SupportedExtensions),
+                ("_hint", "Use read() for plain line-based reading of this file, or grep_in_file for regex search"))));
+
+        var funcs = ProviderFactory.GetFunctions(path, funcName, parameterTypes, CancellationToken);
         if (funcs.Count == 0)
         {
             if (parameterTypes is { Length: > 0 })
             {
-                var allFuncs = ProviderFactory.GetFunctions(path, funcName);
+                var allFuncs = ProviderFactory.GetFunctions(path, funcName, ct: CancellationToken);
                 if (allFuncs.Count > 0)
                 {
                     var overloads = allFuncs.Select(f => new
@@ -354,7 +383,7 @@ COMPACT FIELDS: _r=rows _h=headers _line_start/_line_end=range _sig=signature _t
         List<FunctionInfo> targetFuncs;
         if (!string.IsNullOrEmpty(className))
         {
-            targetFuncs = funcs.Where(f => ClassContainsFunction(path, f, className)).ToList();
+            targetFuncs = funcs.Where(f => ClassContainsFunction(path, f, className, CancellationToken)).ToList();
             if (targetFuncs.Count == 0)
                 throw new McpErrorException(JsonSerializer.Serialize(FReaderError.Make($"Function '{funcName}' not found in class '{className}'",
                     FReaderError.NOT_FOUND)));
@@ -402,12 +431,19 @@ COMPACT FIELDS: _r=rows _h=headers _line_start/_line_end=range _sig=signature _t
         var parameterTypes = GetStringArray(arguments, "parameterTypes");
         var className = GetString(arguments, "className");
 
-        var funcs = ProviderFactory.GetFunctions(path, funcName, parameterTypes);
+        if (!ProviderFactory.HasProvider(path))
+            throw new McpErrorException(JsonSerializer.Serialize(FReaderError.Make(
+                $"FReader has no AST provider for {Path.GetExtension(path)} files",
+                FReaderError.UNSUPPORTED_LANGUAGE,
+                ("_supported_extensions", ProviderFactory.SupportedExtensions),
+                ("_hint", "Use read() for plain line-based reading of this file, or grep_in_file for regex search"))));
+
+        var funcs = ProviderFactory.GetFunctions(path, funcName, parameterTypes, CancellationToken);
         if (funcs.Count == 0)
         {
             if (parameterTypes is { Length: > 0 })
             {
-                var allFuncs = ProviderFactory.GetFunctions(path, funcName);
+                var allFuncs = ProviderFactory.GetFunctions(path, funcName, ct: CancellationToken);
                 if (allFuncs.Count > 0)
                 {
                     var overloads = allFuncs.Select(f => new
@@ -431,7 +467,7 @@ COMPACT FIELDS: _r=rows _h=headers _line_start/_line_end=range _sig=signature _t
         List<FunctionInfo> targetFuncs;
         if (!string.IsNullOrEmpty(className))
         {
-            targetFuncs = funcs.Where(f => ClassContainsFunction(path, f, className)).ToList();
+            targetFuncs = funcs.Where(f => ClassContainsFunction(path, f, className, CancellationToken)).ToList();
             if (targetFuncs.Count == 0)
                 throw new McpErrorException(JsonSerializer.Serialize(FReaderError.Make($"Function '{funcName}' not found in class '{className}'",
                     FReaderError.NOT_FOUND)));
@@ -449,6 +485,7 @@ COMPACT FIELDS: _r=rows _h=headers _line_start/_line_end=range _sig=signature _t
 
             if (includeDocs)
             {
+                CancellationToken.ThrowIfCancellationRequested();
                 var allLines = File.ReadAllLines(path);
                 while (ls > 1)
                 {
@@ -460,7 +497,7 @@ COMPACT FIELDS: _r=rows _h=headers _line_start/_line_end=range _sig=signature _t
                 }
             }
 
-            var readResult = LineEngine.ReadLines(path, ls, le, truncate: 0, stripImports, normalizeIndentFn);
+            var readResult = LineEngine.ReadLines(path, ls, le, truncate: 0, stripImports, normalizeIndentFn, CancellationToken);
             if (readResult.Error is not null)
                 throw new McpErrorException(JsonSerializer.Serialize(readResult.Error));
 
@@ -491,7 +528,7 @@ COMPACT FIELDS: _r=rows _h=headers _line_start/_line_end=range _sig=signature _t
         var matches = new List<object>();
         foreach (var f in targetFuncs)
         {
-            var readResult = LineEngine.ReadLines(path, f.LineStart, f.LineEnd, truncate: 0, stripImports, normalizeIndentFn);
+            var readResult = LineEngine.ReadLines(path, f.LineStart, f.LineEnd, truncate: 0, stripImports, normalizeIndentFn, CancellationToken);
             var sourceLines = readResult.Data is not null ? ExtractLines(readResult.Data) : Array.Empty<string>();
             var matchData = new Dictionary<string, object?>
             {
@@ -531,6 +568,13 @@ COMPACT FIELDS: _r=rows _h=headers _line_start/_line_end=range _sig=signature _t
         var useAliases = GetBool(arguments, "aliases") ?? false;
         var maxChars = GetInt(arguments, "maxChars") ?? 8000;
 
+        if (!ProviderFactory.HasProvider(path))
+            throw new McpErrorException(JsonSerializer.Serialize(FReaderError.Make(
+                $"FReader has no AST provider for {Path.GetExtension(path)} files",
+                FReaderError.UNSUPPORTED_LANGUAGE,
+                ("_supported_extensions", ProviderFactory.SupportedExtensions),
+                ("_hint", "Use read() for plain line-based reading of this file, or grep_in_file for regex search"))));
+
         var namesEl = arguments?.GetProperty("names");
         if (namesEl is null || namesEl.Value.GetArrayLength() == 0)
             throw new McpErrorException(JsonSerializer.Serialize(FReaderError.Make("names array is required", FReaderError.INVALID_REQUEST)));
@@ -553,7 +597,7 @@ COMPACT FIELDS: _r=rows _h=headers _line_start/_line_end=range _sig=signature _t
         var allFuncs = new List<(FunctionInfo F, int Order)>();
         foreach (var nm in names)
         {
-            var funcs = ProviderFactory.GetFunctions(path, nm);
+            var funcs = ProviderFactory.GetFunctions(path, nm, ct: CancellationToken);
             foreach (var f in funcs)
                 allFuncs.Add((f, names.IndexOf(nm)));
         }
@@ -588,7 +632,7 @@ COMPACT FIELDS: _r=rows _h=headers _line_start/_line_end=range _sig=signature _t
         int totalChars = 0;
         foreach (var (start, end, items) in merged)
         {
-            var readResult = LineEngine.ReadLines(path, start, end, truncate: 0, stripImports, normalizeIndentFn);
+            var readResult = LineEngine.ReadLines(path, start, end, truncate: 0, stripImports, normalizeIndentFn, CancellationToken);
             if (readResult.Error is not null) continue;
 
             var lines = readResult.Data is not null ? ExtractLines(readResult.Data) : Array.Empty<string>();
@@ -634,7 +678,8 @@ COMPACT FIELDS: _r=rows _h=headers _line_start/_line_end=range _sig=signature _t
         };
 
         // Warning if > 70% of file
-        var fileInfo = LineEngine.GetInfo(path);
+        CancellationToken.ThrowIfCancellationRequested();
+        var fileInfo = LineEngine.GetInfo(path, CancellationToken);
         if (fileInfo is Dictionary<string, object?> finfo && finfo.TryGetValue("_lines", out var linesVal) && linesVal is int totalFileLines)
         {
             var coveragePct = (double)totalCoverageLines / totalFileLines * 100;
@@ -650,7 +695,7 @@ COMPACT FIELDS: _r=rows _h=headers _line_start/_line_end=range _sig=signature _t
         var path = GetString(arguments, "path") ?? "";
         var useAliases = GetBool(arguments, "aliases") ?? false;
 
-        var summary = ProviderFactory.Summarize(path);
+        var summary = ProviderFactory.Summarize(path, CancellationToken);
         if (summary is null)
             throw new McpErrorException(JsonSerializer.Serialize(FReaderError.Make("Unable to summarize file (unsupported language or read error)",
                 FReaderError.UNSUPPORTED_LANGUAGE)));
@@ -679,7 +724,7 @@ COMPACT FIELDS: _r=rows _h=headers _line_start/_line_end=range _sig=signature _t
         var caseSensitive = GetBool(arguments, "caseSensitive") ?? false;
         var maxMatches = GetInt(arguments, "maxMatches") ?? 20;
 
-        var result = LineEngine.GrepInFile(path, pattern, context, caseSensitive, maxMatches);
+        var result = LineEngine.GrepInFile(path, pattern, context, caseSensitive, maxMatches, CancellationToken);
         if (result is Dictionary<string, object?> grepErr && grepErr.ContainsKey("error"))
             throw new McpErrorException(JsonSerializer.Serialize(result));
         return result;
@@ -739,13 +784,14 @@ COMPACT FIELDS: _r=rows _h=headers _line_start/_line_end=range _sig=signature _t
         return new { _message = msg, _project_root = root };
     }
 
-    static bool ClassContainsFunction(string path, FunctionInfo func, string className)
+    static bool ClassContainsFunction(string path, FunctionInfo func, string className, CancellationToken ct = default)
     {
         try
         {
+            ct.ThrowIfCancellationRequested();
             var code = File.ReadAllText(path);
-            var tree = Microsoft.CodeAnalysis.CSharp.CSharpSyntaxTree.ParseText(code);
-            var root = tree.GetRoot();
+            var tree = Microsoft.CodeAnalysis.CSharp.CSharpSyntaxTree.ParseText(code, cancellationToken: ct);
+            var root = tree.GetRoot(ct);
 
             foreach (var type in root.DescendantNodes().OfType<Microsoft.CodeAnalysis.CSharp.Syntax.TypeDeclarationSyntax>())
             {
@@ -765,7 +811,6 @@ COMPACT FIELDS: _r=rows _h=headers _line_start/_line_end=range _sig=signature _t
     }
 
     protected override string? GetHarnessInstructions() => Harness;
-    protected override int? AutoNotifyThresholdMs => 10000;
 
     protected override object GetInstructions()
     {

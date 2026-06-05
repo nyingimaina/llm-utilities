@@ -1,5 +1,5 @@
 #define MyAppName      "LLM Utilities"
-#define MyAppVersion   "1.33.0"
+#define MyAppVersion   "1.38.0"
 #define MyAppPublisher "Savanna HerdIQ"
 #define PublishDir     "publish"
 #define ReadmeFile     "README.md"
@@ -9,7 +9,7 @@ AppId={{B7C2E4F1-9D3A-4B0E-8F2C-3A7D5E9B1C4F}
 AppName={#MyAppName}
 AppVersion={#MyAppVersion}
 AppPublisher={#MyAppPublisher}
-DefaultDirName={autopf}\LLMUtilities
+DefaultDirName={localappdata}\LLMUtilities
 DefaultGroupName={#MyAppName}
 DisableProgramGroupPage=yes
 OutputDir=installer
@@ -17,7 +17,7 @@ OutputBaseFilename=LLMUtilitiesSetup-{#MyAppVersion}
 Compression=lzma
 SolidCompression=yes
 WizardStyle=modern
-PrivilegesRequired=admin
+PrivilegesRequired=lowest
 ChangesEnvironment=yes
 
 [Languages]
@@ -31,13 +31,14 @@ Source: "{#PublishDir}\runtimes\*";                     DestDir: "{app}\runtimes
 Source: "{#ReadmeFile}";                                DestDir: "{app}"; Flags: ignoreversion
 
 [Registry]
-Root: HKLM; \
-  Subkey: "SYSTEM\CurrentControlSet\Control\Session Manager\Environment"; \
+Root: HKCU; \
+  Subkey: "Environment"; \
   ValueType: expandsz; ValueName: "Path"; \
   ValueData: "{olddata};{app}"; \
   Check: NeedsAddPath(ExpandConstant('{app}'))
 
 [Icons]
+Name: "{group}\LLM Utilities Control Panel"; Filename: "{app}\ControlPanel.exe"; WorkingDir: "{app}"
 Name: "{group}\LLM Utilities README"; Filename: "{app}\README.md"
 
 [Code]
@@ -114,9 +115,7 @@ function NeedsAddPath(Path: string): Boolean;
 var
   Current: string;
 begin
-  if not RegQueryStringValue(HKLM,
-      'SYSTEM\CurrentControlSet\Control\Session Manager\Environment',
-      'Path', Current)
+  if not RegQueryStringValue(HKCU, 'Environment', 'Path', Current)
   then begin Result := True; Exit; end;
   Result := Pos(';' + Lowercase(Path) + ';',
                 ';' + Lowercase(Current) + ';') = 0;
@@ -128,9 +127,7 @@ var
   Lower:   string;
   LowerC:  string;
 begin
-  if not RegQueryStringValue(HKLM,
-      'SYSTEM\CurrentControlSet\Control\Session Manager\Environment',
-      'Path', Current)
+  if not RegQueryStringValue(HKCU, 'Environment', 'Path', Current)
   then Exit;
 
   Lower  := Lowercase(Path);
@@ -143,9 +140,23 @@ begin
   else if Lowercase(Current) = Lower then
     Current := '';
 
-  RegWriteExpandStringValue(HKLM,
-    'SYSTEM\CurrentControlSet\Control\Session Manager\Environment',
-    'Path', Current);
+  RegWriteExpandStringValue(HKCU, 'Environment', 'Path', Current);
+end;
+
+// ── Broadcast environment change (timeout-safe) ─────────────────────────────────
+
+const
+  WM_SETTINGCHANGE = $001A;
+  SMTO_ABORTIFHUNG = $0002;
+
+function SendMessageTimeout(hWnd: HWND; Msg: LongWord; wParam: LongWord; lParam: LongWord; Flags: LongWord; Timeout: LongWord; var Res: LongWord): BOOL;
+  external 'SendMessageTimeoutW@user32.dll stdcall';
+
+procedure BroadcastEnvChange;
+var
+  Dummy: LongWord;
+begin
+  SendMessageTimeout(HWND_BROADCAST, WM_SETTINGCHANGE, 0, 0, SMTO_ABORTIFHUNG, 5000, Dummy);
 end;
 
 // ── Select All click handlers ─────────────────────────────────────────────────
@@ -319,7 +330,27 @@ var
   ResultCode: Integer;
   ExePath: string;
   Args: string;
+  FindRec: TFindRec;
 begin
+  if CurStep = ssInstall then
+  begin
+    Exec('taskkill.exe', '/f /im Rowster.exe', '', SW_HIDE, ewWaitUntilTerminated, ResultCode);
+    Exec('taskkill.exe', '/f /im FReader.exe', '', SW_HIDE, ewWaitUntilTerminated, ResultCode);
+    Exec('taskkill.exe', '/f /im CliSilentProxy.exe', '', SW_HIDE, ewWaitUntilTerminated, ResultCode);
+    Exec('taskkill.exe', '/f /im Notifier.exe', '', SW_HIDE, ewWaitUntilTerminated, ResultCode);
+    Exec('taskkill.exe', '/f /im NotifierHelper.exe', '', SW_HIDE, ewWaitUntilTerminated, ResultCode);
+    Exec('taskkill.exe', '/f /im McpRegistrar.exe', '', SW_HIDE, ewWaitUntilTerminated, ResultCode);
+    Exec('taskkill.exe', '/f /im ControlPanel.exe', '', SW_HIDE, ewWaitUntilTerminated, ResultCode);
+
+    // Remove old Program Files install if present
+    if FindFirst(ExpandConstant('{autopf}\LLMUtilities\*'), FindRec) then
+    begin
+      FindClose(FindRec);
+      Exec('taskkill.exe', '/f /im Rowster.exe', '', SW_HIDE, ewWaitUntilTerminated, ResultCode);
+      Exec('rmdir.exe', '/s /q "' + ExpandConstant('{autopf}\LLMUtilities') + '"', '', SW_HIDE, ewWaitUntilTerminated, ResultCode);
+    end;
+  end;
+
   if CurStep = ssPostInstall then
   begin
     // ── Build summary ──────────────────────────────────────────────────────────
@@ -331,6 +362,8 @@ begin
     SummaryLines.Lines.Add('✓ NotifierHelper.exe installed');
     SummaryLines.Lines.Add('✓ McpRegistrar.exe installed');
     SummaryLines.Lines.Add('✓ LLMUtilities.Commons.dll installed');
+    SummaryLines.Lines.Add('✓ ControlPanel.exe installed');
+    SummaryLines.Lines.Add('✓ Start Menu shortcut created');
     SummaryLines.Lines.Add('✓ LLMUtilities added to system PATH');
 
     // ── MCP registration (Claude Code + optionally Gemini CLI) ─────────────────
@@ -396,6 +429,8 @@ begin
           IntToStr(ResultCode) + '). Check the console output for details.');
       end;
     end;
+
+    BroadcastEnvChange;
   end;
 end;
 

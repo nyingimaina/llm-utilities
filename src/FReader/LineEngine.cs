@@ -1,5 +1,6 @@
 using System.Text;
 using System.Text.RegularExpressions;
+using System.Threading;
 
 namespace FReader;
 
@@ -13,7 +14,8 @@ public static class LineEngine
         int? lineEnd,
         int? truncate,
         bool stripImports = false,
-        bool normalizeIndent = false)
+        bool normalizeIndent = false,
+        CancellationToken ct = default)
     {
         if (!File.Exists(path))
             return Error("File not found", "FILE_NOT_FOUND", ("_path", path));
@@ -23,15 +25,18 @@ public static class LineEngine
             // Binary detection: check first 4KB for null bytes
             using (var detectStream = new FileStream(path, FileMode.Open, FileAccess.Read))
             {
+                ct.ThrowIfCancellationRequested();
                 var buffer = new byte[4096];
                 var read = detectStream.Read(buffer, 0, buffer.Length);
                 for (int i = 0; i < read; i++)
                 {
+                    ct.ThrowIfCancellationRequested();
                     if (buffer[i] == 0)
                         return Error("File is binary and cannot be read as text", "BINARY_FILE");
                 }
             }
 
+            ct.ThrowIfCancellationRequested();
             var allLines = File.ReadAllLines(path, Encoding.UTF8);
             var totalLines = allLines.Length;
 
@@ -169,7 +174,7 @@ public static class LineEngine
         return new LineResult(null, dict);
     }
 
-    public static object GetInfo(string path)
+    public static object GetInfo(string path, CancellationToken ct = default)
     {
         if (!File.Exists(path))
             return FReaderError.Make("File not found", FReaderError.FILE_NOT_FOUND, ("_path", path));
@@ -181,7 +186,7 @@ public static class LineEngine
             using (var reader = new StreamReader(path, Encoding.UTF8))
             {
                 lines = 0;
-                while (reader.ReadLine() is not null) lines++;
+                while (reader.ReadLine() is not null) { lines++; ct.ThrowIfCancellationRequested(); }
             }
 
             return new Dictionary<string, object?>
@@ -204,13 +209,15 @@ public static class LineEngine
         string pattern,
         int context = 2,
         bool caseSensitive = false,
-        int maxMatches = 20)
+        int maxMatches = 20,
+        CancellationToken ct = default)
     {
         if (!File.Exists(path))
             return FReaderError.Make("File not found", FReaderError.FILE_NOT_FOUND, ("_path", path));
 
         try
         {
+            ct.ThrowIfCancellationRequested();
             var allLines = File.ReadAllLines(path, Encoding.UTF8);
             var comparison = caseSensitive ? StringComparison.Ordinal : StringComparison.OrdinalIgnoreCase;
             var regexTimeout = TimeSpan.FromMilliseconds(500);
@@ -224,6 +231,7 @@ public static class LineEngine
             var matchLines = new List<int>();
             for (int i = 0; i < allLines.Length; i++)
             {
+                ct.ThrowIfCancellationRequested();
                 try
                 {
                     if (regex.IsMatch(allLines[i]))

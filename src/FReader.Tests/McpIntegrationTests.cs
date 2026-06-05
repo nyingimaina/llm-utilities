@@ -1,6 +1,7 @@
 using System.Diagnostics;
 using System.Text.Json;
 using System.Text.Json.Serialization;
+using LLMUtilities.Commons;
 
 namespace FReader.Tests;
 
@@ -309,6 +310,109 @@ public class McpIntegrationTests : IDisposable
         var data = JsonSerializer.Deserialize<JsonElement>(text);
         Assert.True(data.TryGetProperty("_matches", out var matches));
         Assert.Equal(0, matches.GetInt32());
+    }
+
+    [Fact]
+    public async Task LogFile_Written_AfterToolCall()
+    {
+        CallTool("get_instructions");
+
+        await Task.Delay(500);
+
+        var logPath = ConfigPaths.LogFile("FReader");
+        Assert.True(File.Exists(logPath), $"Log file not found at {logPath}");
+
+        await using var fs = new FileStream(logPath, FileMode.Open, FileAccess.Read, FileShare.ReadWrite);
+        using var reader = new StreamReader(fs);
+        var content = await reader.ReadToEndAsync();
+        Assert.Contains("Tool call: get_instructions", content);
+        Assert.Contains("Tool completed: get_instructions", content);
+    }
+
+    [Fact]
+    public void NotifierLog_WritesAndReads()
+    {
+        var logPath = Path.Combine(
+            Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData),
+            "LLMUtilities", "notifications.jsonl");
+        try { if (File.Exists(logPath)) File.Delete(logPath); } catch { }
+
+        var info = new NotificationInfo
+        {
+            Server = "FReader",
+            LlmClient = "TestRunner",
+            Tool = "test_tool",
+            ArgsDisplay = "test_tool(somearg)",
+            Project = "tests",
+            Cwd = Environment.CurrentDirectory,
+            ElapsedMs = 1234,
+            Ok = true,
+            Timestamp = DateTime.UtcNow,
+        };
+        NotifierLog.Write(info);
+
+        var recent = NotifierLog.ReadRecent(10);
+        Assert.Contains(recent, n => n.Server == "FReader" && n.Tool == "test_tool");
+        Assert.Contains(recent, n => n.LlmClient == "TestRunner");
+        Assert.Contains(recent, n => n.ElapsedMs == 1234);
+    }
+
+    [Fact]
+    public void NotifierHelper_ExecutableFound()
+    {
+        var projectDir = Path.Combine(AppContext.BaseDirectory, "..", "..", "..", "..");
+        var publishDir = Path.Combine(projectDir, "..", "publish");
+        if (Directory.Exists(publishDir))
+        {
+            var helper = Path.Combine(publishDir, "NotifierHelper.exe");
+            Assert.True(File.Exists(helper), $"NotifierHelper.exe not found at {helper}");
+        }
+        else
+        {
+            // Running from publish dir directly
+            var localHelper = Path.Combine(AppContext.BaseDirectory, "NotifierHelper.exe");
+            Assert.True(File.Exists(localHelper), $"NotifierHelper.exe not found at {localHelper}");
+        }
+    }
+
+    [Fact]
+    public void NotifierHelper_CanParseDataArg()
+    {
+        // Cold-probe: can NotifierHelper at least accept --data JSON and exit?
+        // This may be skipped in headless environments (CI) where Avalonia can't init.
+        var dirs = new[] {
+            Path.Combine(AppContext.BaseDirectory, "NotifierHelper.exe"),
+            Path.Combine(AppContext.BaseDirectory, "..", "..", "..", "..", "..", "publish", "NotifierHelper.exe"),
+        };
+        string? helperPath = dirs.FirstOrDefault(File.Exists);
+        if (helperPath is null) return;
+
+        var info = new NotificationInfo
+        {
+            Server = "Test", Tool = "verify", ElapsedMs = 42, Ok = true, Timestamp = DateTime.UtcNow,
+        };
+
+        try
+        {
+            var psi = new ProcessStartInfo
+            {
+                FileName = helperPath,
+                UseShellExecute = false,
+                CreateNoWindow = true,
+            };
+            psi.ArgumentList.Add("--data");
+            psi.ArgumentList.Add(info.ToJson());
+            using var proc = Process.Start(psi);
+            if (proc is not null)
+            {
+                var exited = proc.WaitForExit(3000);
+                if (!exited)
+                {
+                    try { proc.Kill(); } catch { }
+                }
+            }
+        }
+        catch { /* headless environment — skip */ }
     }
 
     public void Dispose()

@@ -1,6 +1,7 @@
 using System.Diagnostics;
 using System.Text.Json;
 using LLMUtilities.Commons;
+using Serilog;
 
 namespace Notifier;
 
@@ -10,12 +11,14 @@ sealed class NotifierServer : McpServerBase
         AppContext.BaseDirectory,
         OperatingSystem.IsWindows() ? "NotifierHelper.exe" : "NotifierHelper");
 
-    public NotifierServer() : base(new McpServerConfig
+    public NotifierServer(string? configPath = null) : base(new McpServerConfig
     {
         Name = "Notifier",
         Version = GetEntryVersion(),
-        InstructionsToolDescription = "Returns compact instructions for desktop notifications. Cache in session context.",
-    })
+        AnnouncementDirective = "Desktop notification service: notify() for toast + notify_on_complete() for process completion alerts. Use for long-running tasks and cognitive work milestones.",
+        HarnessInstructions = "Use Notifier for desktop notifications on completions, errors, and long-running tasks. notify() for instant toasts, notify_on_complete() to wrap a process.",
+        InstructionsToolDescription = "MANDATORY FIRST STEP: read critical server instructions before using any other tool. Defines notification patterns and usage conventions.",
+    }.WithOverrides(configPath))
     {
     }
 
@@ -29,7 +32,7 @@ sealed class NotifierServer : McpServerBase
         new McpTool
         {
             Name = "notify",
-            Description = "Send a desktop toast. Use for cognitive work completions (analysis, review, reasoning) and opted-in slow ops. DO NOT use for steps the user sees in your reply.",
+            Description = "Send a desktop toast. PREFERRED over bash-based notifications. Use for cognitive work completions (analysis, review, reasoning) and opted-in slow ops. DO NOT use for steps the user sees in your reply.",
             InputSchema = new
             {
                 type = "object",
@@ -50,7 +53,7 @@ sealed class NotifierServer : McpServerBase
         new McpTool
         {
             Name = "notify_on_complete",
-            Description = "Use when you need a custom notification message for a shell command, or when running commands outside CliSilentProxy (background scripts, direct invocations). Returns immediately with _pid; fires toast when the process exits. Not needed for CliSilentProxy.run() commands — those auto-notify unless you want a custom message.",
+            Description = "PREFERRED over bash-based process monitoring. Use when you need a custom notification message for a shell command, or when running commands outside CliSilentProxy (background scripts, direct invocations). Returns immediately with _pid; fires toast when the process exits. Not needed for CliSilentProxy.run() commands — those auto-notify unless you want a custom message.",
             InputSchema = new
             {
                 type = "object",
@@ -388,12 +391,38 @@ $textNodes.Item(1).AppendChild($template.CreateTextNode('{EscapePs(message)}')) 
 
     static void Main(string[] args)
     {
-        if (args.Length > 0 && args[0] == "--mcp")
+        string? configPath = null;
+        string? logDir = null;
+
+        for (int i = 0; i < args.Length; i++)
         {
-            new NotifierServer().Run(Console.In, Console.Out);
-            return;
+            switch (args[i])
+            {
+                case "--mcp": break;
+                case "--config-path" when i + 1 < args.Length: configPath = args[++i]; break;
+                case "--log-dir" when i + 1 < args.Length: logDir = args[++i]; break;
+                default:
+                    Console.Error.WriteLine("Usage: Notifier.exe --mcp [--config-path <path>] [--log-dir <dir>]");
+                    Environment.Exit(1);
+                    return;
+            }
         }
-        Console.Error.WriteLine("Usage: Notifier.exe --mcp");
-        Environment.Exit(1);
+
+        logDir ??= ConfigPaths.LogDir("Notifier");
+        Directory.CreateDirectory(logDir);
+        Log.Logger = new LoggerConfiguration()
+            .MinimumLevel.Information()
+            .WriteTo.File(
+                Path.Combine(logDir, "Notifier.log"),
+                outputTemplate: "{Timestamp:yyyy-MM-dd HH:mm:ss} [{Level:u3}] {Message:lj}{NewLine}{Exception}")
+            .CreateLogger();
+
+        try
+        {
+            configPath ??= ConfigPaths.ConfigFile("Notifier");
+            new NotifierServer(configPath).Run(Console.In, Console.Out);
+        }
+        catch (Exception ex) { Log.Fatal(ex, "Unhandled exception"); }
+        finally { Log.CloseAndFlush(); }
     }
 }

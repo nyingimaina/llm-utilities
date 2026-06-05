@@ -40,49 +40,62 @@ public static class ProviderFactory
 
     public static string GetWorkerScriptPath() => FindWorkerScript();
 
+    public static string[] SupportedExtensions => [".cs", ".ts", ".tsx", ".mts", ".cts", ".js", ".jsx", ".mjs", ".cjs"];
+
+    public static bool HasProvider(string path)
+    {
+        var ext = Path.GetExtension(path);
+        return _providers.ContainsKey(ext);
+    }
+
     public static IProvider? GetProvider(string path)
     {
         var ext = Path.GetExtension(path);
         return _providers.GetValueOrDefault(ext);
     }
 
-    public static List<FunctionInfo> ListFunctions(string path, bool includeSystem = false)
+    public static List<FunctionInfo> ListFunctions(string path, bool includeSystem = false, CancellationToken ct = default)
     {
         var provider = GetProvider(path);
         if (provider is null) return new List<FunctionInfo>();
-        try { return provider.ListFunctions(path, includeSystem); }
+        try { return provider.ListFunctions(path, includeSystem, ct); }
+        catch (OperationCanceledException) { throw; }
         catch { return new List<FunctionInfo>(); }
     }
 
-    public static FunctionInfo? GetFunction(string path, string name)
+    public static FunctionInfo? GetFunction(string path, string name, CancellationToken ct = default)
     {
         var provider = GetProvider(path);
         if (provider is null) return null;
-        try { return provider.GetFunction(path, name); }
+        try { return provider.GetFunction(path, name, ct); }
+        catch (OperationCanceledException) { throw; }
         catch { return null; }
     }
 
-    public static List<FunctionInfo> GetFunctions(string path, string name)
+    public static List<FunctionInfo> GetFunctions(string path, string name, CancellationToken ct = default)
     {
         var provider = GetProvider(path);
         if (provider is null) return new List<FunctionInfo>();
-        try { return provider.GetFunctions(path, name); }
+        try { return provider.GetFunctions(path, name, ct); }
+        catch (OperationCanceledException) { throw; }
         catch { return new List<FunctionInfo>(); }
     }
 
-    public static List<FunctionInfo> GetFunctions(string path, string name, string[]? parameterTypes)
+    public static List<FunctionInfo> GetFunctions(string path, string name, string[]? parameterTypes, CancellationToken ct = default)
     {
         var provider = GetProvider(path);
         if (provider is null) return new List<FunctionInfo>();
-        try { return provider.GetFunctions(path, name, parameterTypes); }
+        try { return provider.GetFunctions(path, name, parameterTypes, ct); }
+        catch (OperationCanceledException) { throw; }
         catch { return new List<FunctionInfo>(); }
     }
 
-    public static string? Summarize(string path)
+    public static string? Summarize(string path, CancellationToken ct = default)
     {
         var provider = GetProvider(path);
         if (provider is null) return null;
-        try { return provider.Summarize(path); }
+        try { return provider.Summarize(path, ct); }
+        catch (OperationCanceledException) { throw; }
         catch { return null; }
     }
 }

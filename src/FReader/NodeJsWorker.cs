@@ -42,7 +42,7 @@ sealed class NodeJsWorker : IDisposable
         _nextId = 0;
     }
 
-    public JsonElement? SendRequest(string method, JsonElement? args)
+    public JsonElement? SendRequest(string method, JsonElement? args, CancellationToken ct = default)
     {
         ObjectDisposedException.ThrowIf(_disposed, this);
         EnsureStarted();
@@ -55,7 +55,24 @@ sealed class NodeJsWorker : IDisposable
             _stdin!.WriteLine(request);
             _stdin!.Flush();
 
-            var line = _stdout!.ReadLine();
+            ct.ThrowIfCancellationRequested();
+
+            var readTask = _stdout!.ReadLineAsync();
+            try
+            {
+                if (!readTask.Wait(TimeSpan.FromMilliseconds(30000), ct))
+                {
+                    KillProcess();
+                    throw new OperationCanceledException(ct);
+                }
+            }
+            catch (OperationCanceledException)
+            {
+                KillProcess();
+                throw;
+            }
+
+            var line = readTask.Result;
             if (line is null)
                 throw new InvalidOperationException("Node.js worker process ended unexpectedly");
 
@@ -75,7 +92,16 @@ sealed class NodeJsWorker : IDisposable
         }
     }
 
-    static readonly object _lock = new();
+    void KillProcess()
+    {
+        if (_process is not null && !_process.HasExited)
+        {
+            try { _process.Kill(entireProcessTree: true); }
+            catch { }
+        }
+    }
+
+    readonly object _lock = new();
 
     public void Dispose()
     {

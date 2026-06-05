@@ -1,0 +1,117 @@
+<Window xmlns="https://github.com/avaloniaui"
+        xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+        x:Class="ControlPanel.MainWindow"
+        Title="LLM Utilities Control Panel"
+        Width="900" Height="650"
+        MinWidth="700" MinHeight="500">
+  <TabControl Margin="8">
+    <TabItem Header="Servers">
+      <DockPanel>
+        <StackPanel DockPanel.Dock="Top" Orientation="Horizontal" Spacing="6" Margin="0,0,0,8">
+          <Button x:Name="BtnRefresh" Content="⟳ Refresh" Click="OnRefresh" />
+          <Button x:Name="BtnTestAll" Content="▶ Test All" Click="OnTestAll" />
+        </StackPanel>
+        <ScrollViewer>
+          <ItemsControl x:Name="ServerList">
+            <ItemsControl.ItemsPanel>
+              <ItemsPanelTemplate>
+                <StackPanel Spacing="8" />
+              </ItemsPanelTemplate>
+            </ItemsControl.ItemsPanel>
+            <ItemsControl.ItemTemplate>
+              <DataTemplate>
+                <Border BorderBrush="LightGray" BorderThickness="1" CornerRadius="6" Padding="10">
+                  <DockPanel>
+                    <StackPanel DockPanel.Dock="Right" Orientation="Horizontal" Spacing="4" VerticalAlignment="Top">
+                      <Button Content="Log" Tag="{Binding Name}" Click="OnOpenLog" />
+                      <Button Content="Test" Tag="{Binding Name}" Click="OnTestConnection" />
+                    </StackPanel>
+                    <StackPanel>
+                      <TextBlock FontSize="16" FontWeight="Bold" Text="{Binding Name}" />
+                      <TextBlock FontSize="12" Text="{Binding Summary}" TextWrapping="Wrap" />
+                      <TextBlock FontSize="12" Foreground="Gray" Text="{Binding RegistrationStatus}" TextWrapping="Wrap" />
+                    </StackPanel>
+                  </DockPanel>
+                </Border>
+              </DataTemplate>
+            </ItemsControl.ItemTemplate>
+          </ItemsControl>
+        </ScrollViewer>
+      </DockPanel>
+    </TabItem>
+
+    <TabItem Header="Configs">
+      <DockPanel>
+        <StackPanel DockPanel.Dock="Top" Orientation="Horizontal" Spacing="6" Margin="0,0,0,8">
+          <ComboBox x:Name="ConfigServerCombo" Width="160" SelectionChanged="OnConfigServerChanged" />
+          <Button Content="Save Config" Click="OnSaveConfig" />
+          <Button Content="Reset to Defaults" Click="OnResetConfig" />
+        </StackPanel>
+        <TextBox x:Name="ConfigEditor" AcceptsReturn="True" AcceptsTab="True"
+                 FontFamily="Consolas, Cascadia Code, Courier New"
+                 FontSize="13" TextWrapping="NoWrap" />
+      </DockPanel>
+    </TabItem>
+
+    <TabItem Header="Logs">
+      <DockPanel>
+        <StackPanel DockPanel.Dock="Top" Orientation="Horizontal" Spacing="6" Margin="0,0,0,8">
+          <ComboBox x:Name="LogServerCombo" Width="160" SelectionChanged="OnLogServerChanged" />
+          <ToggleButton x:Name="BtnToggleTail" Content="⏸ Pause" IsChecked="False" Click="OnToggleTail" />
+          <Button Content="Clear" Click="OnClearLog" />
+          <TextBlock x:Name="LogStatus" VerticalAlignment="Center" Foreground="Gray" />
+        </StackPanel>
+        <TextBox x:Name="LogViewer" AcceptsReturn="True"
+                 FontFamily="Consolas, Cascadia Code, Courier New"
+                 FontSize="13" TextWrapping="NoWrap" IsReadOnly="True" />
+      </DockPanel>
+    </TabItem>
+
+    <TabItem Header="Registration">
+      <DockPanel>
+        <StackPanel DockPanel.Dock="Top" Orientation="Horizontal" Spacing="6" Margin="0,0,0,8">
+          <Button Content="⟳ Refresh" Click="OnRefreshRegistration" />
+        </StackPanel>
+        <ScrollViewer>
+          <ItemsControl x:Name="RegistrationList">
+            <ItemsControl.ItemsPanel>
+              <ItemsPanelTemplate>
+                <StackPanel Spacing="4" />
+              </ItemsPanelTemplate>
+            </ItemsControl.ItemsPanel>
+            <ItemsControl.ItemTemplate>
+              <DataTemplate>
+                <Border BorderBrush="LightGray" BorderThickness="1" CornerRadius="4" Padding="8">
+                  <StackPanel>
+                    <TextBlock FontSize="15" FontWeight="Bold" Text="{Binding LlmName}" />
+                    <TextBlock FontSize="11" Text="{Binding ConfigPath}" />
+                    <StackPanel Orientation="Horizontal" Margin="0,4,0,0" Spacing="12">
+                      <TextBlock FontSize="13" Text="{Binding RowsterLine}" />
+                      <TextBlock FontSize="13" Text="{Binding FReaderLine}" />
+                      <TextBlock FontSize="13" Text="{Binding CliSilentProxyLine}" />
+                      <TextBlock FontSize="13" Text="{Binding NotifierLine}" />
+                    </StackPanel>
+                  </StackPanel>
+                </Border>
+              </DataTemplate>
+            </ItemsControl.ItemTemplate>
+          </ItemsControl>
+        </ScrollViewer>
+      </DockPanel>
+    </TabItem>
+
+    <TabItem Header="About">
+      <StackPanel Margin="16" Spacing="8">
+        <TextBlock FontSize="18" FontWeight="Bold">LLM Utilities</TextBlock>
+        <TextBlock x:Name="TxtVersion" />
+        <TextBlock x:Name="TxtRuntime" />
+        <TextBlock x:Name="TxtInstallDir" />
+        <TextBlock x:Name="TxtConfigDir" />
+        <TextBlock x:Name="TxtLogDir" />
+        <Button Content="📂 Open Install Directory" Click="OnOpenInstallDir" />
+        <Button Content="📂 Open Config Directory" Click="OnOpenConfigDir" />
+        <Button Content="📂 Open Log Directory" Click="OnOpenLogDir" />
+      </StackPanel>
+    </TabItem>
+  </TabControl>
+</Window>

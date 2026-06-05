@@ -1,5 +1,7 @@
 using System.Text.Json;
+using LLMUtilities.Commons;
 using Rowster;
+using Serilog;
 
 var connStr = "";
 var query = "";
@@ -8,6 +10,8 @@ var useTransaction = false;
 var pretty = false;
 var timeoutMins = 5;
 var mcpMode = false;
+string? configPath = null;
+string? logDir = null;
 
 for (int i = 0; i < args.Length; i++)
 {
@@ -21,14 +25,31 @@ for (int i = 0; i < args.Length; i++)
         case "--pretty":        pretty          = true; break;
         case "--timeout" when i + 1 < args.Length && int.TryParse(args[i + 1], out var t):
             timeoutMins = t; i++; break;
+        case "--config-path" when i + 1 < args.Length: configPath = args[++i]; break;
+        case "--log-dir" when i + 1 < args.Length: logDir = args[++i]; break;
     }
 }
 
 if (mcpMode)
 {
-    using var cm = new ConnectionManager();
-    var server = new McpServer(cm, connStr);
-    server.Run(Console.In, Console.Out);
+    logDir ??= ConfigPaths.LogDir("Rowster");
+    Directory.CreateDirectory(logDir);
+        Log.Logger = new LoggerConfiguration()
+            .MinimumLevel.Information()
+            .WriteTo.File(
+                Path.Combine(logDir, "Rowster.log"),
+                outputTemplate: "{Timestamp:yyyy-MM-dd HH:mm:ss} [{Level:u3}] {Message:lj}{NewLine}{Exception}")
+            .CreateLogger();
+
+    try
+    {
+        configPath ??= ConfigPaths.ConfigFile("Rowster");
+        using var cm = new ConnectionManager();
+        var server = new McpServer(cm, connStr, configPath);
+        server.Run(Console.In, Console.Out);
+    }
+    catch (Exception ex) { Log.Fatal(ex, "Unhandled exception"); }
+    finally { Log.CloseAndFlush(); }
     return 0;
 }
 

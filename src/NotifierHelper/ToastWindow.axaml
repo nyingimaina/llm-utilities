@@ -1,9 +1,9 @@
 <Window xmlns="https://github.com/avaloniaui"
         xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
         x:Class="NotifierHelper.ToastWindow"
-        Width="360"
+        Width="380"
         MinHeight="70"
-        MaxHeight="220"
+        MaxHeight="320"
         SizeToContent="Height"
         WindowStartupLocation="Manual"
         SystemDecorations="None"
@@ -14,11 +14,7 @@
   <Window.Styles>
     <Style Selector="Window#Root">
       <Setter Property="Background" Value="Transparent"/>
-      <Setter Property="RenderTransform">
-        <Setter.Value>
-          <TranslateTransform X="400" Y="0"/>
-        </Setter.Value>
-      </Setter>
+      
     </Style>
   </Window.Styles>
 
@@ -34,8 +30,10 @@
               CornerRadius="3,0,0,3"/>
 
       <StackPanel Grid.Column="1"
-                  Margin="16,14,16,14"
+                  Margin="16,12,16,12"
                   HorizontalAlignment="Stretch">
+
+        <!-- Server + LLM Client line -->
         <TextBlock x:Name="SenderLabel"
                    FontSize="11"
                    Foreground="#99FFFFFF"
@@ -43,43 +41,41 @@
                    TextWrapping="NoWrap"
                    IsVisible="False"/>
 
-        <Grid ColumnDefinitions="*, Auto"
-              Margin="0,2,0,0">
-          <TextBlock x:Name="TitleText"
-                     Grid.Column="0"
-                     FontSize="14"
-                     FontWeight="SemiBold"
-                     Foreground="#FFFFFF"
-                     TextTrimming="CharacterEllipsis"
-                     TextWrapping="NoWrap"/>
+        <!-- Tool name + args line -->
+        <TextBlock x:Name="ToolLine"
+                   FontSize="13"
+                   Foreground="#DDFFFFFF"
+                   TextTrimming="CharacterEllipsis"
+                   TextWrapping="NoWrap"
+                   Margin="0,2,0,0"
+                   IsVisible="False"/>
 
-          <Border x:Name="IconBox"
-                  Grid.Column="1"
-                  Width="24"
-                  Height="24"
-                  CornerRadius="12"
-                  Opacity="0"
-                  Margin="8,0,0,0">
-            <TextBlock x:Name="IconText"
-                       FontSize="14"
-                       FontWeight="Bold"
-                       HorizontalAlignment="Center"
-                       VerticalAlignment="Center"/>
-          </Border>
-        </Grid>
+        <!-- Project path line -->
+        <TextBlock x:Name="ProjectLine"
+                   FontSize="11"
+                   Foreground="#88FFFFFF"
+                   TextTrimming="CharacterEllipsis"
+                   TextWrapping="NoWrap"
+                   IsVisible="False"/>
 
+        <!-- Main message / grouped items -->
         <TextBlock x:Name="MessageText"
                    FontSize="13"
                    Foreground="#CCFFFFFF"
                    TextWrapping="Wrap"
-                   Margin="0,6,0,0"
+                   Margin="0,4,0,0"
                    TextTrimming="WordEllipsis"
-                   MaxHeight="60"/>
+                   MaxHeight="80"/>
+
+        <!-- Grouped item list (for grouped notifications) -->
+        <StackPanel x:Name="GroupedList"
+                    Margin="0,4,0,0"
+                    IsVisible="False"/>
 
         <Border x:Name="ProgressBar"
                 Height="3"
                 CornerRadius="1.5"
-                Margin="0,10,0,0"
+                Margin="0,8,0,0"
                 IsVisible="False">
           <Border x:Name="ProgressFill"
                   Width="0"
@@ -92,7 +88,7 @@
                    FontSize="11"
                    Foreground="#66FFFFFF"
                    Text="View More →"
-                   Margin="0,8,0,0"
+                   Margin="0,6,0,0"
                    HorizontalAlignment="Right"
                    IsVisible="False"/>
       </StackPanel>

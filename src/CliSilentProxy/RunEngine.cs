@@ -21,15 +21,43 @@ sealed class RunEngine
 
         var startInfo = new ProcessStartInfo
         {
-            FileName = resolvedCmd,
             WorkingDirectory = workDir ?? Directory.GetCurrentDirectory(),
             RedirectStandardOutput = true,
             RedirectStandardError = true,
             UseShellExecute = false,
             CreateNoWindow = true
         };
-        foreach (var arg in args)
-            startInfo.ArgumentList.Add(arg);
+
+        // .cmd/.bat scripts (e.g. npx.cmd from nvm4w) must run via cmd.exe
+        var shellExt = Path.GetExtension(resolvedCmd);
+        if (OperatingSystem.IsWindows() &&
+            (string.Equals(shellExt, ".cmd", StringComparison.OrdinalIgnoreCase) ||
+             string.Equals(shellExt, ".bat", StringComparison.OrdinalIgnoreCase)))
+        {
+            startInfo.FileName = "cmd.exe";
+            startInfo.ArgumentList.Add("/c");
+            startInfo.ArgumentList.Add(resolvedCmd);
+            foreach (var arg in args)
+                startInfo.ArgumentList.Add(arg);
+        }
+        else if (OperatingSystem.IsWindows() &&
+                 string.Equals(shellExt, ".ps1", StringComparison.OrdinalIgnoreCase))
+        {
+            startInfo.FileName = "powershell.exe";
+            startInfo.ArgumentList.Add("-NoProfile");
+            startInfo.ArgumentList.Add("-ExecutionPolicy");
+            startInfo.ArgumentList.Add("Bypass");
+            startInfo.ArgumentList.Add("-File");
+            startInfo.ArgumentList.Add(resolvedCmd);
+            foreach (var arg in args)
+                startInfo.ArgumentList.Add(arg);
+        }
+        else
+        {
+            startInfo.FileName = resolvedCmd;
+            foreach (var arg in args)
+                startInfo.ArgumentList.Add(arg);
+        }
 
         if (extraPaths is { Length: > 0 })
         {
@@ -309,8 +337,11 @@ sealed class RunEngine
         var pathEnv = Environment.GetEnvironmentVariable("PATH");
         if (pathEnv is null) return command;
 
-        var extensions = Environment.OSVersion.Platform == PlatformID.Win32NT
-            ? new[] { "", ".exe", ".cmd", ".bat", ".ps1" }
+        // On Windows, remove "" so we prefer .exe/.cmd/.bat over extensionless shims
+        // that CreateProcess cannot execute. PATHEXT order would be ideal but static
+        // is sufficient: check real executables and scripts in priority order.
+        var extensions = OperatingSystem.IsWindows()
+            ? new[] { ".exe", ".cmd", ".bat", ".ps1" }
             : new[] { "" };
 
         foreach (var dir in pathEnv.Split(Path.PathSeparator, StringSplitOptions.RemoveEmptyEntries))

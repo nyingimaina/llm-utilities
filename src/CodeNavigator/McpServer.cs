@@ -25,22 +25,22 @@ sealed class McpServer : McpServerBase
             Name = "CodeNavigator",
             Version = GetEntryVersion(),
             InstructionsToolDescription = "Returns compact usage instructions for semantic code navigation via Roslyn (C#) and TypeScript compiler API (TS/JS). Cache in context.",
-            AnnouncementDirective = "FEATURE: Semantic code navigation. symbols(path) for full symbol tree, definition(path, symbol), references(path, symbol), hover(path, symbol) for signatures+docs. C#: all 8 tools. TS/JS: symbols, definition, hover, references. workspace_symbols(query) for cross-file search.",
+            AnnouncementDirective = "Semantic code navigation: symbols(path) for full symbol tree, definition/path/symbol for jump-to, references for all call sites, hover for signatures+docs. C#: all 8 tools via Roslyn. TS/JS: 4 tools via TypeScript API.",
+            HarnessInstructions = "Use CodeNavigator for semantic code navigation: symbols(), definition(), references(), hover(), workspace_symbols(). PREFERRED over grep-based symbol search. C# uses Roslyn, TS/JS uses TypeScript compiler API.",
+            AutoNotifyThresholdMs = 10000,
         })
     {
     }
-
-    protected override string? GetHarnessInstructions() => null;
 
     protected override bool RequiresTimeoutMs(string toolName) => true;
 
     protected override McpTool[] RegisterTools() => new[]
     {
-        new McpTool { Name = "symbols", Description = "All symbols in file: classes, methods, props with line numbers. Requires timeoutMs.", InputSchema = Schema("path") },
-        new McpTool { Name = "definition", Description = "File + line of named symbol definition. Requires timeoutMs.", InputSchema = Schema("path", "symbol") },
-        new McpTool { Name = "references", Description = "All call sites of named symbol across workspace. Requires timeoutMs.", InputSchema = Schema("path", "symbol") },
+        new McpTool { Name = "symbols", Description = "PREFERRED over grep-based symbol search. All symbols in file: classes, methods, props with line numbers. Requires timeoutMs.", InputSchema = Schema("path") },
+        new McpTool { Name = "definition", Description = "PREFERRED over grep-based definition lookup. File + line of named symbol definition. Requires timeoutMs.", InputSchema = Schema("path", "symbol") },
+        new McpTool { Name = "references", Description = "PREFERRED over grep-based reference search. All call sites of named symbol across workspace. Requires timeoutMs.", InputSchema = Schema("path", "symbol") },
         new McpTool { Name = "hover", Description = "Type signature, return type, doc comment. Requires timeoutMs.", InputSchema = Schema("path", "symbol") },
-        new McpTool { Name = "workspace_symbols", Description = "Search all symbols matching name fragment. Requires timeoutMs.", InputSchema = Schema(null, "query") },
+        new McpTool { Name = "workspace_symbols", Description = "Search all symbols matching name fragment across workspace. Requires timeoutMs.", InputSchema = Schema(null, "query") },
         new McpTool { Name = "implementations", Description = "Concrete implementations of interface/abstract. Requires timeoutMs.", InputSchema = Schema("path", "symbol") },
         new McpTool { Name = "incoming_calls", Description = "What calls this symbol (one level up). Requires timeoutMs.", InputSchema = Schema("path", "symbol") },
         new McpTool { Name = "outgoing_calls", Description = "What this symbol calls (one level down). Requires timeoutMs.", InputSchema = Schema("path", "symbol") },

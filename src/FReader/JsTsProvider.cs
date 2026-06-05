@@ -21,7 +21,7 @@ public sealed class JsTsProvider : IProvider, IDisposable
         return _worker;
     }
 
-    JsonElement? CallWorker(string method, object? argsObj = null)
+    JsonElement? CallWorker(string method, object? argsObj = null, CancellationToken ct = default)
     {
         JsonElement? args = null;
         if (argsObj is not null)
@@ -29,17 +29,19 @@ public sealed class JsTsProvider : IProvider, IDisposable
             var json = JsonSerializer.Serialize(argsObj);
             args = JsonDocument.Parse(json).RootElement;
         }
-        return EnsureWorker().SendRequest(method, args);
+        ct.ThrowIfCancellationRequested();
+        return EnsureWorker().SendRequest(method, args, ct);
     }
 
     string ReadContent(string path) => File.ReadAllText(path);
 
-    public List<FunctionInfo> ListFunctions(string path, bool includeSystem = false)
+    public List<FunctionInfo> ListFunctions(string path, bool includeSystem = false, CancellationToken ct = default)
     {
         try
         {
             var content = ReadContent(path);
-            var result = CallWorker("listFunctions", new { path, content, includeSystem });
+            ct.ThrowIfCancellationRequested();
+            var result = CallWorker("listFunctions", new { path, content, includeSystem }, ct);
             if (result is null) return new();
 
             var list = new List<FunctionInfo>();
@@ -56,21 +58,21 @@ public sealed class JsTsProvider : IProvider, IDisposable
         catch { return new(); }
     }
 
-    public FunctionInfo? GetFunction(string path, string name)
+    public FunctionInfo? GetFunction(string path, string name, CancellationToken ct = default)
     {
-        var all = ListFunctions(path);
+        var all = ListFunctions(path, ct: ct);
         return all.Find(f => string.Equals(f.Name, name, StringComparison.OrdinalIgnoreCase));
     }
 
-    public List<FunctionInfo> GetFunctions(string path, string name)
+    public List<FunctionInfo> GetFunctions(string path, string name, CancellationToken ct = default)
     {
-        return ListFunctions(path).FindAll(f =>
+        return ListFunctions(path, ct: ct).FindAll(f =>
             string.Equals(f.Name, name, StringComparison.OrdinalIgnoreCase));
     }
 
-    public List<FunctionInfo> GetFunctions(string path, string name, string[]? parameterTypes)
+    public List<FunctionInfo> GetFunctions(string path, string name, string[]? parameterTypes, CancellationToken ct = default)
     {
-        var all = GetFunctions(path, name);
+        var all = GetFunctions(path, name, ct);
         if (parameterTypes is null || parameterTypes.Length == 0)
             return all;
 
@@ -116,12 +118,13 @@ public sealed class JsTsProvider : IProvider, IDisposable
         return true;
     }
 
-    public string? Summarize(string path)
+    public string? Summarize(string path, CancellationToken ct = default)
     {
         try
         {
             var content = ReadContent(path);
-            var result = CallWorker("summarize", new { path, content });
+            ct.ThrowIfCancellationRequested();
+            var result = CallWorker("summarize", new { path, content }, ct);
             return result?.GetProperty("text").GetString();
         }
         catch { return null; }

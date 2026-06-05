@@ -1,3 +1,4 @@
+using System.IO;
 using Avalonia;
 using Avalonia.Controls.ApplicationLifetimes;
 using Avalonia.Markup.Xaml;
@@ -18,25 +19,38 @@ public partial class App : Application
         {
             var args = Environment.GetCommandLineArgs().Skip(1).ToArray();
 
-            var title = ParseArg(args, "--title") ?? "LLM Utilities";
-            var message = ParseArg(args, "--message") ?? "";
-            var type = ParseArg(args, "--type") ?? "info";
-            var noSound = args.Any(a => a == "--no-sound");
-            var dismissMs = int.TryParse(ParseArg(args, "--dismiss-after-ms"), out var d) ? d : 5000;
-            var sender = ParseArg(args, "--sender");
-            var task = ParseArg(args, "--task");
+            var dataJson = ParseArg(args, "--data") ?? 
+                (ParseArg(args, "--data-file") is { } df && File.Exists(df) ? File.ReadAllText(df) : null);
 
-            var window = new ToastWindow(title, message, type, !noSound, dismissMs, sender, task);
-            desktop.MainWindow = window;
-            window.Show();
-
-            if (dismissMs > 0)
+            if (dataJson is not null)
             {
-                _ = Task.Run(async () =>
+                var window = new ToastWindow(dataJson);
+                desktop.MainWindow = window;
+                window.Show();
+            }
+            else
+            {
+                // Legacy flat args mode (fallback)
+                var title = ParseArg(args, "--title") ?? "LLM Utilities";
+                var message = ParseArg(args, "--message") ?? "";
+                var type = ParseArg(args, "--type") ?? "info";
+                var noSound = args.Any(a => a == "--no-sound");
+                var dismissMs = int.TryParse(ParseArg(args, "--dismiss-after-ms"), out var d) ? d : 5000;
+                var sender = ParseArg(args, "--sender");
+                var task = ParseArg(args, "--task");
+
+                var window = new ToastWindow(title, message, type, !noSound, dismissMs, sender, task);
+                desktop.MainWindow = window;
+                window.Show();
+
+                if (dismissMs > 0)
                 {
-                    await Task.Delay(dismissMs);
-                    await Dispatcher.UIThread.InvokeAsync(() => window.Close());
-                });
+                    _ = Task.Run(async () =>
+                    {
+                        await Task.Delay(dismissMs);
+                        await Dispatcher.UIThread.InvokeAsync(() => window.Close());
+                    });
+                }
             }
         }
 

@@ -13,11 +13,12 @@ public sealed class CSharpProvider : IProvider
         "ToString", "GetHashCode", "Equals", "GetType"
     };
 
-    public List<FunctionInfo> ListFunctions(string path, bool includeSystem = false)
+    public List<FunctionInfo> ListFunctions(string path, bool includeSystem = false, CancellationToken ct = default)
     {
         var code = File.ReadAllText(path);
-        var tree = CSharpSyntaxTree.ParseText(code);
-        var root = tree.GetRoot();
+        ct.ThrowIfCancellationRequested();
+        var tree = CSharpSyntaxTree.ParseText(code, cancellationToken: ct);
+        var root = tree.GetRoot(ct);
         var functions = new List<FunctionInfo>();
 
         foreach (var member in root.DescendantNodes().OfType<MemberDeclarationSyntax>())
@@ -97,23 +98,23 @@ public sealed class CSharpProvider : IProvider
         return false;
     }
 
-    public FunctionInfo? GetFunction(string path, string name)
+    public FunctionInfo? GetFunction(string path, string name, CancellationToken ct = default)
     {
-        return ListFunctions(path, includeSystem: true).Find(f =>
+        return ListFunctions(path, includeSystem: true, ct).Find(f =>
             string.Equals(f.Name, name, StringComparison.OrdinalIgnoreCase) ||
             string.Equals(f.Name, name.TrimStart('.'), StringComparison.OrdinalIgnoreCase));
     }
 
-    public List<FunctionInfo> GetFunctions(string path, string name)
+    public List<FunctionInfo> GetFunctions(string path, string name, CancellationToken ct = default)
     {
-        return ListFunctions(path, includeSystem: true).FindAll(f =>
+        return ListFunctions(path, includeSystem: true, ct).FindAll(f =>
             string.Equals(f.Name, name, StringComparison.OrdinalIgnoreCase) ||
             string.Equals(f.Name, name.TrimStart('.'), StringComparison.OrdinalIgnoreCase));
     }
 
-    public List<FunctionInfo> GetFunctions(string path, string name, string[]? parameterTypes)
+    public List<FunctionInfo> GetFunctions(string path, string name, string[]? parameterTypes, CancellationToken ct = default)
     {
-        var all = GetFunctions(path, name);
+        var all = GetFunctions(path, name, ct);
         if (parameterTypes is null || parameterTypes.Length == 0)
             return all;
 
@@ -173,14 +174,15 @@ public sealed class CSharpProvider : IProvider
         return TypeAliasMap.TryGetValue(typeName, out var canonical) ? canonical : typeName;
     }
 
-    public string? Summarize(string path)
+    public string? Summarize(string path, CancellationToken ct = default)
     {
         string? code;
         try { code = File.ReadAllText(path); }
         catch { return null; }
+        ct.ThrowIfCancellationRequested();
 
-        var tree = CSharpSyntaxTree.ParseText(code);
-        var root = tree.GetRoot();
+        var tree = CSharpSyntaxTree.ParseText(code, cancellationToken: ct);
+        var root = tree.GetRoot(ct);
         var sb = new StringBuilder();
 
         var fileLineCount = code.Split('\n').Length;
