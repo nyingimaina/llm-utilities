@@ -400,6 +400,14 @@ $nodes.Item(1).AppendChild($template.CreateTextNode($m)) > $null;
                 "_sent=notification delivered  _pid=child process ID  _status=running|failed",
                 "_fallback=suggestion when notification fails  _notify_cooldown_ms=ms until next allowed",
                 "_shouldNotify=true when opt-in threshold was exceeded (requires _meta:{canNotify:true})",
+                "",
+                "=== _meta PARAMS (any tool call) ===",
+                "Pass _meta in the tool call params object to opt in to advanced features:",
+                "  _meta:{canNotify:true}  — server injects _shouldNotify:true when threshold exceeded;",
+                "                            YOU then call notify() with a human message.",
+                "  _meta:{sender:\"Claude\"} — LLM identity for auto-notifications (default: server name).",
+                "  _meta:{project:\"name\"}  — project name surfaced in auto-notification body.",
+                "  _meta:{progressToken:N} — enables $/progress notifications during long ops.",
             ],
         };
     }

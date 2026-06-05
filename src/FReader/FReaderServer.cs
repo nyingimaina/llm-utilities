@@ -919,6 +919,14 @@ COMPACT FIELDS: _r=rows _h=headers _line_start/_line_end=range _sig=signature _t
         instr.Add("");
         instr.Add("Use summarize first to get a structural overview, then read_function to drill into specific functions.");
         instr.Add("This avoids reading the entire file and saves 60-90% tokens.");
+        instr.Add("");
+        instr.Add("=== _meta PARAMS (any tool call) ===");
+        instr.Add("Pass _meta in the tool call params object to opt in to advanced features:");
+        instr.Add("  _meta:{canNotify:true}  — server injects _shouldNotify:true when threshold exceeded;");
+        instr.Add("                            YOU then call Notifier.notify() with a human message.");
+        instr.Add("  _meta:{sender:\"Claude\"} — LLM identity for auto-notifications.");
+        instr.Add("  _meta:{project:\"name\"}  — project name surfaced in notification body.");
+        instr.Add("  _meta:{progressToken:N} — enables $/progress notifications during long ops.");
         return new { _h = instr.ToArray() };
     }
 }

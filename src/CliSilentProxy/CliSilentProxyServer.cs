@@ -237,6 +237,15 @@ sealed class CliSilentProxyServer : McpServerBase
         instr.Add("Notifier.notify() yourself with a human-friendly description of what");
         instr.Add("was done (e.g. 'dotnet build succeeded (12s)' not 'CliSilentProxy: 8.2s').");
     instr.Add("");
+    instr.Add("=== _meta PARAMS (any tool call) ===");
+    instr.Add("Pass _meta in the tool call params object to opt in to advanced features:");
+    instr.Add("  _meta:{canNotify:true}   — server injects _shouldNotify:true when threshold exceeded;");
+    instr.Add("                             YOU then call Notifier.notify() with a human message.");
+    instr.Add("  _meta:{sender:\"Claude\"}  — LLM identity surfaced in notifications.");
+    instr.Add("  _meta:{project:\"name\"}   — project name surfaced in notifications.");
+    instr.Add("  _meta:{progressToken:N}  — enables $/progress notifications during long ops.");
+    instr.Add("Without canNotify the server fires a generic auto-notification (no action needed).");
+    instr.Add("");
     return new { _h = instr.ToArray() };
     }
 }
