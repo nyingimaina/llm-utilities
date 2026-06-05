@@ -210,18 +210,6 @@ sealed class NotifierServer : McpServerBase
             _ => ("info", true),
         };
 
-    static Process StartDetached(string fileName, string arguments)
-    {
-        var psi = new ProcessStartInfo
-        {
-            FileName = fileName,
-            Arguments = arguments,
-            UseShellExecute = false,
-            CreateNoWindow = true,
-        };
-        return Process.Start(psi)!;
-    }
-
     string? SendNativeNotification(string title, string message, string type, bool sound)
     {
         try
@@ -243,45 +231,72 @@ sealed class NotifierServer : McpServerBase
 
     static string? SendWindowsNotification(string title, string message, string type, bool sound)
     {
+        // Title and message are Base64-encoded so no PowerShell metacharacter can
+        // escape the string context and execute injected code.
+        var titleB64  = Convert.ToBase64String(System.Text.Encoding.UTF8.GetBytes(title));
+        var messageB64 = Convert.ToBase64String(System.Text.Encoding.UTF8.GetBytes(message));
+        var soundSrc  = type == "error"
+            ? "ms-winsoundevent:Notification.Critical"
+            : "ms-winsoundevent:Notification.Default";
+
         var psScript = $@"
 Add-Type -AssemblyName System.Runtime.WindowsRuntime;
 $null = [Windows.UI.Notifications.ToastNotificationManager, Windows.UI.Notifications, ContentType = WindowsRuntime];
+$t = [System.Text.Encoding]::UTF8.GetString([System.Convert]::FromBase64String('{titleB64}'));
+$m = [System.Text.Encoding]::UTF8.GetString([System.Convert]::FromBase64String('{messageB64}'));
 $template = [Windows.UI.Notifications.ToastNotificationManager]::GetTemplateContent([Windows.UI.Notifications.ToastTemplateType]::ToastText02);
-$textNodes = $template.GetElementsByTagName('text');
-$textNodes.Item(0).AppendChild($template.CreateTextNode('{EscapePs(title)}')) > $null;
-$textNodes.Item(1).AppendChild($template.CreateTextNode('{EscapePs(message)}')) > $null;
-{(sound ? "$audio = $template.CreateElement('audio'); $audio.SetAttribute('src', if ('{type}' -eq 'error'){{'ms-winsoundevent:Notification.Critical'}}else{{'ms-winsoundevent:Notification.Default'}}); $template.GetElementsByTagName('toast').Item(0).AppendChild($audio);" : "")}
+$nodes = $template.GetElementsByTagName('text');
+$nodes.Item(0).AppendChild($template.CreateTextNode($t)) > $null;
+$nodes.Item(1).AppendChild($template.CreateTextNode($m)) > $null;
+{(sound ? $"$audio = $template.CreateElement('audio'); $audio.SetAttribute('src', '{soundSrc}'); $template.GetElementsByTagName('toast').Item(0).AppendChild($audio) > $null;" : "")}
 [Windows.UI.Notifications.ToastNotificationManager]::CreateToastNotifier('LLM Utilities').Show($template);
 ";
-        StartDetached("powershell", $"-NoProfile -ExecutionPolicy Bypass -Command \"{psScript.Replace("\"", "\\\"")}\"");
+        var psi = new ProcessStartInfo("powershell") { UseShellExecute = false, CreateNoWindow = true };
+        psi.ArgumentList.Add("-NoProfile");
+        psi.ArgumentList.Add("-ExecutionPolicy");
+        psi.ArgumentList.Add("Bypass");
+        psi.ArgumentList.Add("-Command");
+        psi.ArgumentList.Add(psScript);
+        Process.Start(psi);
         return null;
     }
 
     static string? SendMacNotification(string title, string message, string type, bool sound)
     {
-        var script = $"display notification \"{EscapeOsx(message)}\" with title \"{EscapeOsx(title)}\"";
+        // Use ArgumentList so the OS passes arguments verbatim — no shell expansion.
+        // The AppleScript string still requires its own escaping for " and \.
+        var safeTitle   = title.Replace("\\", "\\\\").Replace("\"", "\\\"");
+        var safeMessage = message.Replace("\\", "\\\\").Replace("\"", "\\\"");
+        var script      = $"display notification \"{safeMessage}\" with title \"{safeTitle}\"";
+
         if (sound)
         {
             var soundFile = type == "error" ? "Basso" : "Ping";
-            StartDetached("afplay", $"/System/Library/Sounds/{soundFile}.aiff");
+            var afplay = new ProcessStartInfo("afplay") { UseShellExecute = false, CreateNoWindow = true };
+            afplay.ArgumentList.Add($"/System/Library/Sounds/{soundFile}.aiff");
+            Process.Start(afplay);
         }
-        StartDetached("osascript", $"-e \"{EscapeOsx(script)}\"");
+
+        var psi = new ProcessStartInfo("osascript") { UseShellExecute = false, CreateNoWindow = true };
+        psi.ArgumentList.Add("-e");
+        psi.ArgumentList.Add(script);
+        Process.Start(psi);
         return null;
     }
 
     static string? SendLinuxNotification(string title, string message, string type, bool sound)
     {
-        var urgency = type == "error" ? "critical" : "normal";
-        var args = $"-u {urgency} -t 5000 \"{EscapeShell(title)}\" \"{EscapeShell(message)}\"";
-        if (sound)
-            args = $"-u {urgency} -t 5000 \"{EscapeShell(title)}\" \"{EscapeShell(message)}\"";
-        StartDetached("notify-send", args);
+        // ArgumentList bypasses shell parsing — title/message are passed verbatim.
+        var psi = new ProcessStartInfo("notify-send") { UseShellExecute = false, CreateNoWindow = true };
+        psi.ArgumentList.Add("-u");
+        psi.ArgumentList.Add(type == "error" ? "critical" : "normal");
+        psi.ArgumentList.Add("-t");
+        psi.ArgumentList.Add("5000");
+        psi.ArgumentList.Add(title);
+        psi.ArgumentList.Add(message);
+        Process.Start(psi);
         return null;
     }
-
-    static string EscapePs(string s) => s.Replace("'", "''");
-    static string EscapeOsx(string s) => s.Replace("\"", "\\\"").Replace("'", "'\\''");
-    static string EscapeShell(string s) => s.Replace("\"", "\\\"");
 
     protected override string? GetHarnessInstructions() => null;
 
