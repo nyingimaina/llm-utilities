@@ -144,7 +144,8 @@ sealed class NotifierServer : McpServerBase
             try
             {
                 var sw = Stopwatch.StartNew();
-                var exited = proc!.WaitForExit(timeoutMs ?? Timeout.Infinite);
+                const int MaxWaitMs = 3_600_000; // 1-hour cap prevents indefinite process leak
+                var exited = proc!.WaitForExit(timeoutMs ?? MaxWaitMs);
                 sw.Stop();
 
                 if (!exited)
@@ -193,8 +194,7 @@ sealed class NotifierServer : McpServerBase
                 if (!sound) helperPsi.ArgumentList.Add("--no-sound");
                 helperPsi.ArgumentList.Add("--dismiss-after-ms");
                 helperPsi.ArgumentList.Add(dismissAfterMs.ToString());
-                using var proc = Process.Start(helperPsi);
-                proc?.WaitForExit(3000);
+                Process.Start(helperPsi);
                 return null;
             }
             catch { /* fall through to OS-native */ }
